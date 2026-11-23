@@ -1,23 +1,27 @@
 # PhotoScope 操作与功能说明
 
-> 版本 1.3 ｜ macOS 13.0 及以上 ｜ universal（Apple Silicon `arm64` + Intel `x86_64`）
+> 版本 1.4 ｜ macOS 13.0 及以上 ｜ universal（Apple Silicon `arm64` + Intel `x86_64`）
 >
-> PhotoScope 是一款本地运行的 macOS 照片/视频查看器：左侧选目录、右上放大图、右下缩略图条、顶部工具栏。所有浏览与元数据读取都在本机完成，不上传照片。
+> PhotoScope 是一款本地运行的 macOS 照片/视频查看器：左侧选目录、右上（单张大图 / 全部照片网格 / 并排双图）、右下缩略图条、顶部工具栏。所有浏览与元数据读取都在本机完成，不上传照片。
 
-主界面预览：
+主界面预览（单张视图）：
 
 ![PhotoScope 主界面](Support/Preview.png)
 
 ![输入图片说明](%E6%88%AA%E5%B1%8F2026-11-19%2018.39.17.png)
 
 ![输入图片说明](%E6%88%AA%E5%B1%8F2026-11-19%2018.35.55.png)
+
+
+> 1.4 新增「全部照片列表（网格）」与「双张并排对比」，用标题栏右上角三段图标切换；界面预览见第七、八节。
+
 ---
 
 ## 一、安装与启动
 
 ### 从 DMG 安装（推荐）
 
-1. 双击 `PhotoScope-1.3.dmg`，挂载后出现 `PhotoScope.app`、`Applications` 快捷方式、`README.txt`（简版）和 `PhotoScope-操作与功能说明.md`（完整手册）。
+1. 双击 `PhotoScope-1.4.dmg`，挂载后出现 `PhotoScope.app`、`Applications` 快捷方式、`README.txt`（简版）和 `PhotoScope-操作与功能说明.md`（完整手册）。
 2. 把 `PhotoScope.app` 拖到 `Applications`（应用程序）即可。
 3. 双击启动。
 
@@ -40,7 +44,7 @@ xattr -dr com.apple.quarantine /Applications/PhotoScope.app
 cd /Volumes/machack2/download/swift_program/PhotoScope
 ./build.sh                       # release + universal（默认）
 ./build.sh release native run    # 只编译本机架构，构建后直接启动
-./make_dmg.sh                    # 重新生成 PhotoScope-1.3.dmg
+./make_dmg.sh                    # 重新生成 PhotoScope-1.4.dmg
 ```
 
 ---
@@ -50,22 +54,24 @@ cd /Volumes/machack2/download/swift_program/PhotoScope
 | 区域 | 位置 | 作用 |
 | --- | --- | --- |
 | 目录树 | 左侧约 250 pt，可拖动分隔线 | 选要看的文件夹；底部有「添加目录…」与「包含子文件夹」 |
-| 大图 / 视频 | 右上 | 显示当前照片，或视频封面与播放器 |
-| 状态栏 | 大图下方 | 文件名、`序号/总数`、文件大小、像素尺寸、视频标记、旋转角度、操作提示；右侧显示缩放百分比 |
-| 缩略图条 | 右下，横向滚动 | 当前目录全部媒体的缩略图，可左右切换、多选、右键操作 |
-| 工具栏 | 顶部 | 打开文件夹｜上一张/下一张｜缩小/放大/适合窗口/实际大小｜信息/地图位置/另存为 JPG |
+| 主显示区 | 右上，三种模式 | ① 单张大图 / 视频 ② 全部照片列表（网格） ③ 并排双图对比 |
+| 视图切换 | 标题栏右上角三段图标 | 网格（3×3 方格）｜单张（大方块）｜并排（两竖条）；当前段橙红高亮 |
+| 状态栏 | 主显示区下方 | 文件名、`序号/总数`、文件大小、像素尺寸、视频标记、旋转角度、视图模式、操作提示；右侧显示缩放百分比 |
+| 缩略图条 | 右下，横向滚动 | 当前目录全部媒体的缩略图，始终保留；可左右切换、多选、右键操作 |
+| 工具栏 | 顶部 | 打开文件夹｜上一张/下一张｜缩小/放大/适合窗口/实际大小｜信息/地图位置/另存为 JPG（纯图标 + 中文标签） |
 
 窗口最小尺寸 940×620，标题栏与窗口位置会被系统记忆。
 
 ---
 
-## 三、快速上手（5 步）
+## 三、快速上手（6 步）
 
 1. 点工具栏「**打开文件夹**」，或点左侧底部「添加目录…」，选中一个照片目录。
 2. 目录树中单击某个文件夹，右下列出该目录全部照片与视频，并自动选中第一张。
 3. 单击缩略图、点工具栏「上一张 / 下一张」、或按 `←` / `→` 切换照片。
 4. 点「信息」看 EXIF；有 GPS 时「地图位置」会亮起，可查看拍摄点。
 5. 点「另存为 JPG」，选择质量与保存位置，即可导出并保留原始 EXIF / GPS。
+6. 点标题栏**右上角三段图标**切换「全部照片列表 / 单张 / 双张对比」，详见第六～八节。
 
 > 也可以不进程序：在访达里右键照片 →「打开方式」→ PhotoScope，程序会自动打开该照片所在目录并定位选中它，详见第四节。
 
@@ -113,7 +119,51 @@ PhotoScope cannot open files in the "JPEG image" format.
 
 ---
 
-## 六、大图查看与缩放
+## 六、三种视图模式与右上角切换控件
+
+标题栏**右上角**有一组三段图标，当前模式用橙红色标出：
+
+| 段 | 图标 | 模式 | 作用 |
+| --- | --- | --- | --- |
+| 1 | 3×3 方格 | 全部照片列表 | 网格显示当前目录所有照片 + 简要 EXIF |
+| 2 | 大方块 + 下方小方块 | 单张查看 | 程序原有视图：右上大图 / 视频 + 右下缩略图条 |
+| 3 | 左右两竖条 | 双张对比 | 左右并排两张照片，各自可选图 |
+
+- **切换**：点图标；或用「显示」菜单 → 全部照片列表 / 单张查看 / 双张对比（`⌥⌘1` / `⌥⌘2` / `⌥⌘3`）。
+- **记住选择**：视图模式写入本机偏好，下次启动沿用；从访达打开照片时也保持当前模式并定位到该文件。
+- 三种模式共用**同一份目录列表、排序结果与当前选中项**；右下缩略图条始终保留。状态栏会标注当前模式（如「全部照片列表 · 92 张」「A 侧编辑中 · A xxx ↔ B yyy」）。
+- 切换视图只改显示，不写磁盘、不改原文件。
+
+---
+
+## 七、全部照片列表（网格视图）
+
+![全部照片列表](Support/Preview-Grid.png)
+
+- 右上区域改为可上下滚动的网格，一次列出当前目录（勾选「包含子文件夹」时含所有子目录）的**全部照片与视频**；列数随窗口宽度自动调整（约 930 pt 宽时 5 列）。
+- 每格包含：缩略图、文件名、最多 4 行简要信息 —— 拍摄日期时间、机型、镜头、快门/光圈/ISO/焦距；无 EXIF 时用文件修改时间兜底，视频显示时长。
+- **橙红色边框** = 当前选中照片；单击网格项会同步底部缩略图条、状态栏与信息面板。
+- **双击**网格项 → 回到单张大图并选中该照片。
+- `⌘` / `Shift` 多选、右键菜单与缩略图条完全一致（旋转、恢复方向、移到废纸篓、排序等）；右键落在未选中项上会先选中再弹菜单。
+- 缩略图与简要 EXIF 都在后台异步读取并缓存，滚动大目录不会卡住界面。
+- 网格模式没有大图，工具栏的放大 / 缩小 / 适合窗口 / 实际大小会置灰；切回单张或双图即恢复。
+
+---
+
+## 八、双张并排对比
+
+![双张并排对比](Support/Preview-Compare.png)
+
+- 左右两个独立面板：**A 选择** / **B 备用**，进入时默认显示相邻两张（末张时 B 回退到前一张）。
+- 点击任一侧图片区域或顶部标签即可切换**活动侧**，活动侧带橙红色边框；状态栏显示 `A 侧编辑中 · A 文件名 ↔ B 文件名`。
+- 活动侧的照片由底部缩略图条、`←` / `→`、工具栏「上一张 / 下一张」控制；另一侧保持不变。信息（EXIF）、地图位置、另存为 JPG 都作用于活动侧照片。
+- **缩放联动**：工具栏放大/缩小、适合窗口、实际大小以及触控板捏合同时作用于两侧，右侧状态栏显示共同倍率，便于同倍率比较细节。
+- 右键菜单里的非破坏性旋转同样会刷新到对比面板。
+- 视频在对比模式下显示**封面帧**（不播放）；要播放请切回单张视图。
+
+---
+
+## 九、大图查看与缩放
 
 | 操作 | 工具栏 / 菜单 | 说明 |
 | --- | --- | --- |
@@ -130,7 +180,7 @@ PhotoScope cannot open files in the "JPEG image" format.
 
 ---
 
-## 七、信息（EXIF）面板
+## 十、信息（EXIF）面板
 
 点工具栏「信息」或 `⌘I` 打开独立浮动窗口，特点：
 
@@ -142,7 +192,7 @@ PhotoScope cannot open files in the "JPEG image" format.
 
 ---
 
-## 八、地图位置（高德地图）
+## 十一、地图位置（高德地图）
 
 仅当当前照片/视频能读到 GPS 时，工具栏「**地图位置**」才可用（有 GPS 时按钮带强调色）。
 
@@ -165,7 +215,7 @@ Key 与安全密钥只保存在本机 `UserDefaults`（`PhotoScope.amapKey` / `P
 
 ---
 
-## 九、另存为 JPG（格式转换 + EXIF 保留）
+## 十二、另存为 JPG（格式转换 + EXIF 保留）
 
 点工具栏「另存为 JPG」或 `⌘S`，也可在缩略图右键菜单里选「另存为 JPG…」（仅单选时可用）。
 
@@ -192,7 +242,7 @@ Key 与安全密钥只保存在本机 `UserDefaults`（`PhotoScope.amapKey` / `P
 
 ---
 
-## 十、视频播放
+## 十三、视频播放
 
 - 选中视频时右上显示**封面帧 + 高对比「▶ 播放视频」按钮 + 文件名**。
 - 点按钮后交给系统 `AVPlayerView` 播放：内建播放/暂停、进度拖动、音量、全屏切换。
@@ -201,7 +251,7 @@ Key 与安全密钥只保存在本机 `UserDefaults`（`PhotoScope.amapKey` / `P
 
 ---
 
-## 十一、缩略图右键菜单
+## 十四、缩略图右键菜单
 
 在缩略图上右键，菜单如下（带 SF Symbols 图标，当前排序项带勾选）：
 
@@ -247,7 +297,7 @@ Key 与安全密钥只保存在本机 `UserDefaults`（`PhotoScope.amapKey` / `P
 
 ---
 
-## 十二、主菜单与快捷键
+## 十五、主菜单与快捷键
 
 | 菜单 | 项目 | 快捷键 |
 | --- | --- | --- |
@@ -255,9 +305,10 @@ Key 与安全密钥只保存在本机 `UserDefaults`（`PhotoScope.amapKey` / `P
 | 文件 | 另存为 JPG… | `⌘S` |
 | 文件 | JPG 导出质量… | — |
 | 文件 | 移到废纸篓… | — |
+| 显示 | 全部照片列表 / 单张查看 / 双张对比 | `⌥⌘1` / `⌥⌘2` / `⌥⌘3` |
 | 显示 | 放大 / 缩小 | `⌘+` / `⌘-` |
 | 显示 | 适合窗口 / 实际大小 | `⌘0` / `⌘1` |
-| 显示 | 上一张 / 下一张 | `←` / `→`（主窗口为焦点时） |
+| 显示 | 上一张 / 下一张 | `←` / `→`（主窗口为焦点时；双图模式只切换活动侧） |
 | 显示 | 顺时针 / 逆时针旋转 90° | `⌘]` / `⌘[` |
 | 显示 | 恢复原始方向 | — |
 | 显示 | 排序方式（子菜单，带勾选） | — |
@@ -269,7 +320,7 @@ Key 与安全密钥只保存在本机 `UserDefaults`（`PhotoScope.amapKey` / `P
 
 ---
 
-## 十三、支持的格式
+## 十六、支持的格式
 
 | 类别 | 扩展名 |
 | --- | --- |
@@ -283,9 +334,9 @@ Key 与安全密钥只保存在本机 `UserDefaults`（`PhotoScope.amapKey` / `P
 
 ---
 
-## 十四、偏好、文件安全与已知限制
+## 十七、偏好、文件安全与已知限制
 
-**本机保存的偏好（UserDefaults）**：上次打开的目录、自定义目录列表、排序字段与方向、JPG 导出质量、每张照片的旋转覆盖、高德 Key 与安全密钥。
+**本机保存的偏好（UserDefaults）**：上次打开的目录、自定义目录列表、排序字段与方向、**视图模式（网格 / 单张 / 双图）**、JPG 导出质量、每张照片的旋转覆盖、高德 Key 与安全密钥。
 
 **对磁盘的写入只有两类**：
 
@@ -297,7 +348,8 @@ Key 与安全密钥只保存在本机 `UserDefaults`（`PhotoScope.amapKey` / `P
 **已知限制**
 
 - 旋转覆盖是本机偏好，用其他看图软件打开同一文件不会看到旋转；需要给别人看时请「另存为 JPG」把旋转烘焙进像素。
-- 视频播放方向无法覆盖；视频能写出的 EXIF 取决于素材是否含创建时间 / GPS。
+- 视频播放方向无法覆盖；视频能写出的 EXIF 取决于素材是否含创建时间 / GPS。双张对比模式显示视频封面帧，播放需切回单张视图。
+- 并排对比的两侧使用同一缩放倍率；两张原始像素尺寸差异很大时，其中一张会显得较小。
 - 少数 EXIF 字段（如部分机型的 `ImageStabilization`、个别 RAW 的 `{Exif}.ColorSpace`）由 ImageIO 的 JPEG 编码器忽略，属于系统行为，不算导出失败。
 - 超大的厂商 MakerNote 会被裁剪以适配 JPEG APP1 段限制。
 - 高德地图需要**你自己申请的有效 Key**，未配置时只显示坐标卡片；真实 Key 下的瓦片加载依赖网络与 Key 的域名白名单设置。
@@ -305,42 +357,46 @@ Key 与安全密钥只保存在本机 `UserDefaults`（`PhotoScope.amapKey` / `P
 
 ---
 
-## 十五、命令行自检与诊断
+## 十八、命令行自检与诊断
 
 ```bash
-# 不启动 UI，逐项验证格式识别、坐标转换、菜单、旋转、排序、EXIF/GPS 保留等
+# 不启动 UI，逐项验证格式识别、坐标转换、菜单、旋转、排序、视图模式、EXIF/GPS 保留等
 "/Applications/PhotoScope.app/Contents/MacOS/PhotoScope" --selftest --dir /path/to/photos
 
-# 启动时直接打开指定目录
-"/Applications/PhotoScope.app/Contents/MacOS/PhotoScope" --dir /path/to/photos
+# 启动时直接打开指定目录，并直接进入网格 / 双图视图（不改动记住的视图偏好）
+"/Applications/PhotoScope.app/Contents/MacOS/PhotoScope" --dir /path/to/photos --view-mode grid
+"/Applications/PhotoScope.app/Contents/MacOS/PhotoScope" --dir /path/to/photos --view-mode compare
 ```
 
-自检输出逐行 `PASS` / `FAIL`，全部通过时退出码为 `0`，有失败项为 `1`。其余参数主要供开发/自动化验证界面使用：`--dir <目录>`、`--open-file <文件路径>`（模拟访达「打开方式」）、`--select <文件名>`、`--show-info`、`--show-map`、`--map-debug`、`--show-save`、`--dump-quality <png>`、`--show-quality-preview`、`--rotate <n>`、`--sort-by <key>`、`--dump-context-menu`、`--dump-layout`、`--screenshot <png>`（可配 `--delay`、`--quit-after-screenshot`）、`--capture-windows <前缀>`（可配 `--capture-delay`）。
+自检输出逐行 `PASS` / `FAIL`，全部通过时退出码为 `0`，有失败项为 `1`。其余参数主要供开发/自动化验证界面使用：`--dir <目录>`、`--view-mode <grid|single|compare>`、`--dump-view-mode`（打印当前模式、网格列数、A/B 照片）、`--compare-side <left|right>`（模拟点击对比面板）、`--open-file <文件路径>`（模拟访达「打开方式」）、`--select <文件名>`、`--show-info`、`--show-map`、`--map-debug`、`--show-save`、`--dump-quality <png>`、`--show-quality-preview`、`--rotate <n>`、`--sort-by <key>`、`--dump-context-menu`、`--dump-layout`、`--screenshot <png>`（可配 `--delay`、`--quit-after-screenshot`）、`--capture-windows <前缀>`（可配 `--capture-delay`）。
 
 ---
 
-## 十六、项目结构
+## 十九、项目结构
 
 ```
 PhotoScope/
 ├── Package.swift                 # SwiftPM，macOS 13+，纯 AppKit，无第三方依赖
 ├── build.sh                      # 编译 + 组装 .app（ad-hoc 签名）
 ├── make_dmg.sh                   # 生成 UDZO 压缩 DMG 并校验挂载
-├── PhotoScope-1.3.dmg            # 分发安装包
+├── PhotoScope-1.4.dmg            # 分发安装包（推荐）
 ├── PhotoScope.app                # 可直接运行的应用程序
 ├── PhotoScope-操作与功能说明.md  # 本文档
 ├── Support/
-│   ├── Info.plist                # 版本 1.3、图标、文档类型、权限说明
+│   ├── Info.plist                # 版本 1.4、图标、文档类型、权限说明
 │   ├── AppIcon.icns / .png       # 应用图标
 │   ├── generate_icon.swift       # 图标矢量绘制脚本
-│   ├── Preview.png               # 主界面预览
-│   └── Preview-Rotation.png      # 旋转效果预览
+│   ├── Preview.png               # 单张视图预览
+│   ├── Preview-Rotation.png      # 旋转效果预览
+│   ├── Preview-Grid.png          # 全部照片列表（网格）预览
+│   └── Preview-Compare.png       # 双张并排对比预览
 └── Sources/PhotoScope/
     ├── AppDelegate.swift / main.swift / MainWindowController.swift
-    ├── Models/        # MediaItem、DirectoryNode、MediaSortOptions
+    ├── Models/        # MediaItem、DirectoryNode、MediaSortOptions、ViewMode
     ├── Services/      # 扫描、解码、缩略图缓存、元数据、EXIF 保留、坐标转换、
-    │                  # 高德页面、JPG 导出、旋转存储、排序索引、访达打开路由
+    │                  # 高德页面、JPG 导出、旋转存储、排序索引、网格简要 EXIF、
+    │                  # 访达打开路由
     ├── Views/         # 目录树、大图、缩略图条、右键菜单、信息面板、地图窗口、
-    │                  # 视频播放、质量控件
+    │                  # 视频播放、质量控件、视图切换控件、网格视图、并排对比视图
     └── SelfTest.swift # 命令行自检
 ```
