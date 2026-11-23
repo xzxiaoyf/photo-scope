@@ -15,7 +15,7 @@ private enum ToolbarID {
     static let save = "ps.save"
 }
 
-/// 主窗口：左侧目录树 / 右上大图或视频 / 右下缩略图条 / 顶部工具栏。
+/// 主窗口：左侧目录树 / 右上（单张大图、全部照片网格、并排双图）/ 右下缩略图条 / 顶部工具栏。
 ///
 /// 代码按「服务层（Services）+ 视图层（Views）+ 控制器」划分，
 /// 后续新增功能（幻灯片、批量导出、排序、评分、关键字检索等）只需在工具栏与控制器挂新入口。
@@ -31,11 +31,14 @@ final class MainWindowController: NSWindowController,
     private let viewerContainer = NSView()
     private let imageViewer = ImageViewer()
     private let videoView = VideoPlayerView()
+    private let gridView = PhotoGridView()
+    private let compareView = CompareView()
     private let stripView = ThumbnailStrip()
     private let statusLabel = NSTextField(labelWithString: "请选择左侧目录")
     private let zoomLabel = NSTextField(labelWithString: "")
 
     private var toolbarButtons: [String: NSButton] = [:]
+    private var viewModeControl: ViewModeControl?
     private var infoController: MetadataWindowController?
     private var mapController: MapWindowController?
     private var keyMonitor: Any?
@@ -48,6 +51,13 @@ final class MainWindowController: NSWindowController,
     private var currentIndex: Int = -1
     private var currentDirectory: URL?
     private var currentMetadata: PhotoMetadata?
+
+    /// 右上区域当前显示方式（偏好记忆）。
+    private var viewMode: ViewMode = .single
+    /// 并排对比：左右两侧对应的照片下标与当前活动侧。
+    private var compareLeft: Int?
+    private var compareRight: Int?
+    private var compareActive: CompareSide = .left
 
     private var scanToken = UUID()
     private var imageToken = UUID()
@@ -138,11 +148,19 @@ final class MainWindowController: NSWindowController,
         viewerContainer.translatesAutoresizingMaskIntoConstraints = false
         imageViewer.translatesAutoresizingMaskIntoConstraints = false
         videoView.translatesAutoresizingMaskIntoConstraints = false
+        gridView.translatesAutoresizingMaskIntoConstraints = false
+        compareView.translatesAutoresizingMaskIntoConstraints = false
         viewerContainer.addSubview(imageViewer)
         viewerContainer.addSubview(videoView)
+        viewerContainer.addSubview(gridView)
+        viewerContainer.addSubview(compareView)
         pin(imageViewer, to: viewerContainer)
         pin(videoView, to: viewerContainer)
+        pin(gridView, to: viewerContainer)
+        pin(compareView, to: viewerContainer)
         videoView.isHidden = true
+        gridView.isHidden = true
+        compareView.isHidden = true
 
         let statusBar = NSView()
         statusBar.translatesAutoresizingMaskIntoConstraints = false
@@ -208,6 +226,18 @@ final class MainWindowController: NSWindowController,
         toolbar.allowsUserCustomization = false
         toolbar.sizeMode = .regular
         window?.toolbar = toolbar
+
+        // 三段切换控件挂在标题栏右侧：不占用工具栏宽度，窗口较窄时也不会被收进溢出菜单。
+        let control = ViewModeControl(selected: viewMode)
+        control.onChange = { [weak self] mode in self?.applyViewMode(mode, persist: true) }
+        viewModeControl = control
+        let holder = NSView(frame: NSRect(x: 0, y: 0, width: 108, height: 28))
+        holder.addSubview(control)
+        control.frame.origin = NSPoint(x: 2, y: 1)
+        let accessory = NSTitlebarAccessoryViewController()
+        accessory.view = holder
+        accessory.layoutAttribute = .right
+        window?.addTitlebarAccessoryViewController(accessory)
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -220,7 +250,6 @@ final class MainWindowController: NSWindowController,
             NSToolbarItem.Identifier(ToolbarID.zoomIn),
             NSToolbarItem.Identifier(ToolbarID.fit),
             NSToolbarItem.Identifier(ToolbarID.actual),
-            .flexibleSpace,
             NSToolbarItem.Identifier(ToolbarID.info),
             NSToolbarItem.Identifier(ToolbarID.map),
             NSToolbarItem.Identifier(ToolbarID.save)
@@ -250,15 +279,16 @@ final class MainWindowController: NSWindowController,
         guard let spec = specs[id] else { return nil }
 
         let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-        let button = NSButton(title: spec.0, target: self, action: spec.2)
+        // 按钮本身只放图标，中文名称由 NSToolbarItem.label 显示在图标下方。
+        // 这样窄窗口也不会把「另存为 JPG」等按钮挤进溢出菜单。
+        let button = NSButton(title: "", target: self, action: spec.2)
         button.image = NSImage(systemSymbolName: spec.1, accessibilityDescription: spec.0)
-        button.imagePosition = .imageLeading
+        button.imagePosition = .imageOnly
         button.bezelStyle = .rounded
-        button.font = NSFont.systemFont(ofSize: 11)
         button.toolTip = spec.0
         button.sizeToFit()
         var size = button.frame.size
-        size.width += 10
+        size.width = max(30, size.width + 8)
         size.height = max(26, size.height)
         button.setFrameSize(size)
 
@@ -281,8 +311,32 @@ final class MainWindowController: NSWindowController,
         stripView.onContextAction = { [weak self] action, indexes in
             self?.handleContextAction(action, indexes: indexes)
         }
+        gridView.onSelect = { [weak self] index in
+            self?.select(index: index)
+        }
+        gridView.onActivate = { [weak self] index in
+            guard let self else { return }
+            self.select(index: index)
+            self.applyViewMode(.single, persist: true)
+        }
+        gridView.onContextAction = { [weak self] action, indexes in
+            self?.handleContextAction(action, indexes: indexes)
+        }
         imageViewer.onZoomChanged = { [weak self] magnification in
-            self?.zoomLabel.stringValue = String(format: "%.0f%%", magnification * 100)
+            guard let self, self.viewMode == .single else { return }
+            self.zoomLabel.stringValue = String(format: "%.0f%%", magnification * 100)
+        }
+        compareView.onZoomChanged = { [weak self] magnification in
+            guard let self, self.viewMode == .compare else { return }
+            self.zoomLabel.stringValue = String(format: "%.0f%%", magnification * 100)
+        }
+        compareView.onActiveSideChanged = { [weak self] side in
+            guard let self else { return }
+            self.compareActive = side
+            let index = side == .left ? self.compareLeft : self.compareRight
+            if let index { self.select(index: index) }
+            self.statusNote = side == .left ? "当前编辑：左侧 A" : "当前编辑：右侧 B"
+            self.updateStatus()
         }
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -300,11 +354,14 @@ final class MainWindowController: NSWindowController,
             }
         }
 
+        applyViewMode(ViewMode.current, persist: false)
         updateSaveToolTip()
         restoreLastDirectory()
     }
 
     private func restoreLastDirectory() {
+        // --dir 由 AppDelegate 在启动后统一处理，这里再恢复一次会产生并发扫描竞态。
+        guard !CommandLine.arguments.contains("--dir") else { return }
         guard let path = UserDefaults.standard.string(forKey: lastDirectoryKey) else { return }
         let url = URL(fileURLWithPath: path)
         var isDirectory: ObjCBool = false
@@ -364,10 +421,12 @@ final class MainWindowController: NSWindowController,
             let found = MediaScanner.scan(directory: directory, recursive: recursive)
             // 目录加载即按用户记住的排序偏好排列（拍摄时间/型号/镜头需要读 EXIF）。
             MediaSortIndex.shared.sorted(found, options: MediaSortOptions.current) { [weak self] sorted in
-                guard let self = self, self.scanToken == token else { return }
+                guard let self = self, self.scanToken == token,
+                      self.currentDirectory?.standardizedFileURL == directory.standardizedFileURL else { return }
                 self.pendingSelection = nil
                 self.items = sorted
                 self.stripView.reload(items: sorted)
+                self.reloadAuxiliaryData()
 
                 var index = sorted.isEmpty ? -1 : 0
                 var note = "排序：\(MediaSortOptions.current.summary)"
@@ -395,11 +454,8 @@ final class MainWindowController: NSWindowController,
             currentMetadata = nil
             imageToken = UUID()
             metadataToken = UUID()
-            imageViewer.clear()
-            imageViewer.isHidden = false
-            videoView.stop()
-            videoView.isHidden = true
             stripView.select(index: -1)
+            presentCurrentImage(for: nil)
             infoController?.update(with: nil, fileName: nil)
             updateToolbarState()
             updateStatus()
@@ -410,46 +466,127 @@ final class MainWindowController: NSWindowController,
         currentMetadata = nil
         let item = items[index]
         stripView.select(index: index)
+        presentCurrentImage(for: item)
+        loadMetadata(for: item)
+        updateToolbarState()
+        updateStatus()
+    }
 
+    /// 按当前视图模式显示选中的照片：单张大图 / 网格选中 / 并排活动侧。
+    private func presentCurrentImage(for item: MediaItem?) {
         let imageLoad = UUID()
-        let metadataLoad = UUID()
         imageToken = imageLoad
-        metadataToken = metadataLoad
 
-        if item.isVideo {
-            imageViewer.clear()
-            imageViewer.isHidden = true
-            videoView.isHidden = false
-            videoView.load(url: item.url)
-            zoomLabel.stringValue = "—"
-        } else {
-            videoView.stop()
-            videoView.isHidden = true
-            imageViewer.isHidden = false
-            imageViewer.clear()
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                let image = ImageDecoder.displayNSImage(url: item.url)
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self, self.imageToken == imageLoad else { return }
-                    self.imageViewer.setImage(image)
-                    self.zoomLabel.stringValue = String(format: "%.0f%%", self.imageViewer.magnification * 100)
+        switch viewMode {
+        case .single:
+            gridView.isHidden = true
+            compareView.isHidden = true
+            guard let item else {
+                imageViewer.clear()
+                imageViewer.isHidden = false
+                videoView.stop()
+                videoView.isHidden = true
+                zoomLabel.stringValue = ""
+                return
+            }
+            if item.isVideo {
+                imageViewer.clear()
+                imageViewer.isHidden = true
+                videoView.isHidden = false
+                videoView.load(url: item.url)
+                zoomLabel.stringValue = "—"
+            } else {
+                videoView.stop()
+                videoView.isHidden = true
+                imageViewer.isHidden = false
+                imageViewer.clear()
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    let image = ImageDecoder.displayNSImage(url: item.url)
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.imageToken == imageLoad else { return }
+                        self.imageViewer.setImage(image)
+                        self.zoomLabel.stringValue = String(format: "%.0f%%",
+                                                            self.imageViewer.magnification * 100)
+                    }
                 }
             }
-        }
 
+        case .grid:
+            imageViewer.clear()
+            imageViewer.isHidden = true
+            videoView.stop()
+            videoView.isHidden = true
+            compareView.isHidden = true
+            gridView.isHidden = false
+            gridView.select(index: currentIndex)
+            zoomLabel.stringValue = ""
+
+        case .compare:
+            imageViewer.clear()
+            imageViewer.isHidden = true
+            videoView.stop()
+            videoView.isHidden = true
+            gridView.isHidden = true
+            compareView.isHidden = false
+            if item != nil { assignActiveSide(index: currentIndex) }
+            refreshCompare()
+        }
+    }
+
+    private func loadMetadata(for item: MediaItem) {
+        let metadataLoad = UUID()
+        metadataToken = metadataLoad
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let metadata = MetadataReader.read(item)
             DispatchQueue.main.async { [weak self] in
-                guard let self = self, self.metadataToken == metadataLoad else { return }
+                guard let self, self.metadataToken == metadataLoad else { return }
                 self.currentMetadata = metadata
                 self.infoController?.update(with: metadata, fileName: item.name)
                 self.updateToolbarState()
                 self.updateStatus()
             }
         }
+    }
 
+    /// 切换显示方式。persist = false 用于启动恢复 / 自动化诊断，不改动用户偏好。
+    func applyViewMode(_ mode: ViewMode, persist: Bool) {
+        viewMode = mode
+        if persist { ViewMode.current = mode }
+        viewModeControl?.setSelected(mode)
+
+        if mode == .grid {
+            gridView.reload(items: items)
+        }
+        if mode == .compare {
+            let pair = CompareView.defaultPair(current: currentIndex, count: items.count)
+            compareLeft = pair.left
+            compareRight = pair.right
+            compareActive = .left
+            compareView.clear()
+        }
+        presentCurrentImage(for: currentItem)
         updateToolbarState()
         updateStatus()
+        NSLog("PhotoScope view mode -> %@", mode.rawValue)
+    }
+
+    /// 目录扫描 / 排序 / 删除后，网格与对比视图的数据必须同步重建。
+    private func reloadAuxiliaryData() {
+        gridView.reload(items: items)
+        let pair = CompareView.defaultPair(current: currentIndex, count: items.count)
+        compareLeft = pair.left
+        compareRight = pair.right
+        compareActive = .left
+        compareView.clear()
+    }
+
+    private func assignActiveSide(index: Int) {
+        if compareActive == .left { compareLeft = index } else { compareRight = index }
+    }
+
+    private func refreshCompare() {
+        compareView.show(items: items, left: compareLeft, right: compareRight, active: compareActive)
+        zoomLabel.stringValue = String(format: "%.0f%%", compareView.magnification * 100)
     }
 
     /// 自动化验证用：按文件名选中一张照片。
@@ -466,10 +603,12 @@ final class MainWindowController: NSWindowController,
 
         setEnabled(ToolbarID.previous, currentIndex > 0)
         setEnabled(ToolbarID.next, currentIndex >= 0 && currentIndex + 1 < items.count)
-        setEnabled(ToolbarID.zoomIn, isImage)
-        setEnabled(ToolbarID.zoomOut, isImage)
-        setEnabled(ToolbarID.fit, isImage)
-        setEnabled(ToolbarID.actual, isImage)
+        // 网格模式没有大图，缩放按钮无意义；并排模式对两侧同时生效。
+        let canZoom = viewMode != .grid && isImage
+        setEnabled(ToolbarID.zoomIn, canZoom)
+        setEnabled(ToolbarID.zoomOut, canZoom)
+        setEnabled(ToolbarID.fit, canZoom)
+        setEnabled(ToolbarID.actual, canZoom)
         setEnabled(ToolbarID.info, hasItem)
         setEnabled(ToolbarID.map, hasGPS)
         setEnabled(ToolbarID.save, hasItem)
@@ -503,6 +642,17 @@ final class MainWindowController: NSWindowController,
         if item.isVideo { parts.append("视频") }
         let turns = RotationStore.quarterTurns(for: item.url)
         if turns != 0 { parts.append("旋转 \(turns * 90)°") }
+        switch viewMode {
+        case .grid:
+            parts.append("全部照片列表 · \(items.count) 张")
+        case .single:
+            break
+        case .compare:
+            let left = compareLeft.flatMap { items.indices.contains($0) ? items[$0].name : nil } ?? "—"
+            let right = compareRight.flatMap { items.indices.contains($0) ? items[$0].name : nil } ?? "—"
+            let active = compareActive == .left ? "A" : "B"
+            parts.append("\(active) 侧编辑中 · A \(left) ↔ B \(right)")
+        }
         if let note = statusNote { parts.append(note) }
         statusLabel.stringValue = parts.joined(separator: "   •   ")
     }
@@ -534,6 +684,14 @@ final class MainWindowController: NSWindowController,
             ThumbnailCache.shared.invalidate(url)
         }
         stripView.refresh(indexes: imageIndexes)
+        gridView.refresh(indexes: imageIndexes)
+        if viewMode == .compare {
+            for side in CompareSide.allCases {
+                if let index = compareView.index(for: side), imageIndexes.contains(index) {
+                    compareView.reload(side: side)
+                }
+            }
+        }
         if imageIndexes.contains(currentIndex) { select(index: currentIndex) }
         statusNote = delta > 0
             ? "已顺时针旋转 \(imageIndexes.count) 张（原文件未改动）"
@@ -549,6 +707,14 @@ final class MainWindowController: NSWindowController,
             ThumbnailCache.shared.invalidate(url)
         }
         stripView.refresh(indexes: indexes)
+        gridView.refresh(indexes: indexes)
+        if viewMode == .compare {
+            for side in CompareSide.allCases {
+                if let index = compareView.index(for: side), indexes.contains(index) {
+                    compareView.reload(side: side)
+                }
+            }
+        }
         if indexes.contains(currentIndex) { select(index: currentIndex) }
         statusNote = "已恢复 \(indexes.count) 张照片的原始方向"
         updateStatus()
@@ -597,6 +763,7 @@ final class MainWindowController: NSWindowController,
         let remaining = items.filter { !removed.contains($0.url.standardizedFileURL) }
         items = remaining
         stripView.reload(items: remaining)
+        reloadAuxiliaryData()
         let next = remaining.isEmpty ? -1 : min(max(0, anchor), remaining.count - 1)
         select(index: next)
         updateToolbarState()
@@ -648,6 +815,7 @@ final class MainWindowController: NSWindowController,
             guard let self = self, self.sortToken == token else { return }
             self.items = sorted
             self.stripView.reload(items: sorted)
+            self.reloadAuxiliaryData()
             let index = anchorURL.flatMap { url in sorted.firstIndex { $0.url == url } }
                 ?? (sorted.isEmpty ? -1 : 0)
             self.select(index: index)
@@ -679,6 +847,9 @@ final class MainWindowController: NSWindowController,
     @objc func sortByLens(_ sender: Any?) { changeSort(key: .lens, order: nil) }
     @objc func sortAscending(_ sender: Any?) { changeSort(key: nil, order: .ascending) }
     @objc func sortDescending(_ sender: Any?) { changeSort(key: nil, order: .descending) }
+    @objc func switchToGridView(_ sender: Any?) { applyViewMode(.grid, persist: true) }
+    @objc func switchToSingleView(_ sender: Any?) { applyViewMode(.single, persist: true) }
+    @objc func switchToCompareView(_ sender: Any?) { applyViewMode(.compare, persist: true) }
 
     // MARK: - 工具栏 / 菜单动作
 
@@ -706,24 +877,29 @@ final class MainWindowController: NSWindowController,
         select(index: currentIndex + 1)
     }
 
+    private var canZoomCurrent: Bool {
+        guard viewMode != .grid, let item = currentItem else { return false }
+        return viewMode == .compare || !item.isVideo
+    }
+
     @objc func zoomIn(_ sender: Any?) {
-        guard currentItem?.isVideo == false else { return }
-        imageViewer.zoomIn()
+        guard canZoomCurrent else { return }
+        if viewMode == .compare { compareView.zoomIn() } else { imageViewer.zoomIn() }
     }
 
     @objc func zoomOut(_ sender: Any?) {
-        guard currentItem?.isVideo == false else { return }
-        imageViewer.zoomOut()
+        guard canZoomCurrent else { return }
+        if viewMode == .compare { compareView.zoomOut() } else { imageViewer.zoomOut() }
     }
 
     @objc func fitToWindow(_ sender: Any?) {
-        guard currentItem?.isVideo == false else { return }
-        imageViewer.fit()
+        guard canZoomCurrent else { return }
+        if viewMode == .compare { compareView.fit() } else { imageViewer.fit() }
     }
 
     @objc func actualSize(_ sender: Any?) {
-        guard currentItem?.isVideo == false else { return }
-        imageViewer.actualSize()
+        guard canZoomCurrent else { return }
+        if viewMode == .compare { compareView.actualSize() } else { imageViewer.actualSize() }
     }
 
     @objc func toggleInfo(_ sender: Any?) {
@@ -852,15 +1028,48 @@ final class MainWindowController: NSWindowController,
         print("ORDER [\(MediaSortOptions.current.summary)] \(items.count) 项: \(preview)")
     }
 
+    /// --view-mode grid|single|compare：启动即切换视图，不写入用户偏好。
+    func debugSetViewMode(_ raw: String) {
+        guard let mode = ViewMode(rawValue: raw) else {
+            NSLog("PhotoScope unknown --view-mode: %@", raw)
+            return
+        }
+        applyViewMode(mode, persist: false)
+    }
+
+    /// --compare-side left|right：模拟点击某一侧，验证活动侧切换链路。
+    func debugActivateCompareSide(_ raw: String) {
+        guard viewMode == .compare else { return }
+        let side: CompareSide = raw == "right" ? .right : .left
+        compareActive = side
+        compareView.setActive(side)
+        let index = side == .left ? compareLeft : compareRight
+        if let index { select(index: index) }
+        statusNote = side == .left ? "当前编辑：左侧 A" : "当前编辑：右侧 B"
+        updateStatus()
+    }
+
+    func debugDumpViewMode() {
+        let left = compareLeft.flatMap { items.indices.contains($0) ? items[$0].name : nil } ?? "—"
+        let right = compareRight.flatMap { items.indices.contains($0) ? items[$0].name : nil } ?? "—"
+        print("VIEW mode=\(viewMode.rawValue) segments=\(ViewModeControl.segmentCount) "
+              + "gridItems=\(items.count) gridColumns=\(PhotoGridView.columns(forWidth: gridView.bounds.width)) "
+              + "gridHidden=\(gridView.isHidden) compareHidden=\(compareView.isHidden) "
+              + "imageHidden=\(imageViewer.isHidden) active=\(compareActive.rawValue) "
+              + "A=\(left) B=\(right)")
+    }
+
     func dumpLayout() {
         guard let window = window, let content = window.contentView else { return }
-        NSLog("PhotoScope layout: window=%@ content=%@ split=%@ tree=%@ viewer=%@ strip=%@ toolbar=%@",
+        NSLog("PhotoScope layout: window=%@ content=%@ split=%@ tree=%@ viewer=%@ grid=%@ compare=%@ strip=%@ toolbar=%@",
               NSStringFromRect(window.frame), NSStringFromRect(content.bounds),
               NSStringFromRect(splitView.frame), NSStringFromRect(treeView.frame),
-              NSStringFromRect(viewerContainer.frame), NSStringFromRect(stripView.frame),
+              NSStringFromRect(viewerContainer.frame), NSStringFromRect(gridView.frame),
+              NSStringFromRect(compareView.frame), NSStringFromRect(stripView.frame),
               window.toolbar?.items.map { "\($0.itemIdentifier.rawValue):\(NSStringFromRect($0.view?.frame ?? .zero))" }.joined(separator: ",") ?? "none")
         treeView.dumpLayout()
         videoView.dumpLayout()
+        debugDumpViewMode()
     }
 
     func captureScreenshot(to url: URL) -> Bool {

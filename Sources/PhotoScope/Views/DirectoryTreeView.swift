@@ -148,6 +148,8 @@ final class DirectoryTreeView: NSView, NSOutlineViewDataSource, NSOutlineViewDel
         outlineView.reloadData()
 
         if select {
+            // 先清掉上一行的选中态，避免 reloadData 后残留的旧目录触发一次多余的刷新
+            outlineView.deselectAll(nil)
             if let node = roots.first(where: { $0.url.standardizedFileURL == target }) {
                 let row = outlineView.row(forItem: node)
                 if row >= 0 {

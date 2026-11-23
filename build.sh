@@ -60,6 +60,7 @@ echo "    地图: 高德地图 JS API 2.0 —— 到 lbs.amap.com 申请「Web�
 echo "    导出: 另存为 JPG 保留原始 EXIF / GPS，质量可在保存面板调整或「文件 → JPG 导出质量…」预设"
 echo "    打包: ./make_dmg.sh 生成可分发的 DMG 安装包"
 echo "    列表: 在缩略图上右键可旋转 / 移到废纸篓 / 按文件名·拍摄时间·型号·镜头排序"
+echo "    视图: 标题栏右上角三段图标 = 全部照片列表 / 单张 / 双张对比（⌥⌘1/2/3）"
 echo "    访达: 右键照片 →「打开方式」→ PhotoScope 会自动打开所在目录并定位该文件"
 echo "    图标: swift Support/generate_icon.swift Support/AppIcon.png 可重新生成"
 

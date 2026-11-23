@@ -145,6 +145,16 @@ final class ImageViewer: NSView {
         notifyZoom()
     }
 
+    /// 并排对比时把另一侧的缩放倍率同步过来。
+    /// 不触发 onZoomChanged，避免两个视图互相通知形成回环。
+    func applyExternalMagnification(_ value: CGFloat) {
+        guard imageView.image != nil else { return }
+        let clamped = min(max(value, scrollView.minMagnification), scrollView.maxMagnification)
+        guard abs(scrollView.magnification - clamped) > 0.0005 else { return }
+        mode = .manual
+        scrollView.magnification = clamped
+    }
+
     private func applyFit() {
         guard let image = imageView.image,
               image.size.width > 0, image.size.height > 0 else { return }

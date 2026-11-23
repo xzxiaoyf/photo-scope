@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 APP_NAME="PhotoScope"
 VERSION="$(plutil -extract CFBundleShortVersionString raw Support/Info.plist)"
 VOLUME_NAME="${APP_NAME} ${VERSION}"
-DMG="$(pwd)/${APP_NAME}-${VERSION}.dmg"
+DMG="${PS_DMG_OUTPUT:-$(pwd)/${APP_NAME}-${VERSION}.dmg}"
 STAGE="$(mktemp -d /tmp/photoscope-dmg.XXXXXX)"
 MOUNT=""
 
@@ -56,6 +56,11 @@ PhotoScope.app →「打开」→「打开」；或在终端执行：
 功能速览
 --------
 · 左侧目录树选目录，底部缩略图条左右切换（← → / 工具栏 ‹ ›）
+· 标题栏右上角三段图标切换三种视图（⌥⌘1 / ⌥⌘2 / ⌥⌘3）：
+  · 全部照片列表：网格显示当前目录所有照片 + 拍摄时间/机型/镜头/曝光摘要，
+    双击网格项回到单张大图
+  · 单张查看：大图 / 视频 + 底部缩略图条
+  · 双张并排对比：A/B 两侧分别选图，点击面板切换活动侧，缩放两侧联动
 · 访达右键照片 →「打开方式」→ PhotoScope：自动打开所在目录并定位到该文件
 · 工具栏：放大、缩小、适合窗口、实际大小、信息(EXIF)、地图位置、另存为 JPG
 · 支持 JPG / HEIC / HEIF / AVIF / PNG / TIFF / WebP，以及各厂相机 RAW

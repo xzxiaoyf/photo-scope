@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var mainWindowController: MainWindowController?
     private var qualityPreviewWindow: NSWindow?
     private var sortMenu: NSMenu?
+    private var viewMenu: NSMenu?
     /// Finder / Launch Services 可能在 applicationDidFinishLaunching 之前就把文件路径送进来。
     private var pendingOpenFileURL: URL?
 
@@ -42,6 +43,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
                 let ok = wc.revealFromFinder(url)
                 NSLog("PhotoScope --open-file %@ -> %@", url.path, ok ? "accepted" : "rejected")
+            }
+        }
+
+        // --view-mode grid|single|compare：启动时直接进入指定视图（不改用户偏好）。
+        if let i = args.firstIndex(of: "--view-mode"), i + 1 < args.count {
+            let raw = args[i + 1]
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak wc] in
+                wc?.debugSetViewMode(raw)
+                NSLog("PhotoScope --view-mode %@", raw)
+            }
+        }
+        if args.contains("--dump-view-mode") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak wc] in
+                wc?.debugDumpViewMode()
+            }
+        }
+        if let i = args.firstIndex(of: "--compare-side"), i + 1 < args.count {
+            let raw = args[i + 1]
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak wc] in
+                wc?.debugActivateCompareSide(raw)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak wc] in
+                wc?.debugDumpViewMode()
             }
         }
 
@@ -256,6 +280,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // 显示
         let viewItem = NSMenuItem()
         let viewMenu = NSMenu(title: "显示")
+        let modeSelectors = [#selector(MainWindowController.switchToGridView(_:)),
+                             #selector(MainWindowController.switchToSingleView(_:)),
+                             #selector(MainWindowController.switchToCompareView(_:))]
+        for (index, mode) in ViewMode.allCases.enumerated() {
+            let item = NSMenuItem(title: mode.title, action: modeSelectors[index],
+                                  keyEquivalent: mode.shortcut)
+            item.target = target
+            item.keyEquivalentModifierMask = [.command, .option]
+            item.toolTip = mode.toolTip
+            item.tag = 300 + index
+            viewMenu.addItem(item)
+        }
+        viewMenu.addItem(.separator())
+        viewMenu.delegate = self
+        self.viewMenu = viewMenu
         add(viewMenu, "放大", #selector(MainWindowController.zoomIn(_:)), "+", target)
         add(viewMenu, "缩小", #selector(MainWindowController.zoomOut(_:)), "-", target)
         add(viewMenu, "适合窗口", #selector(MainWindowController.fitToWindow(_:)), "0", target)
@@ -318,8 +357,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item)
     }
 
-    /// 排序子菜单每次展开前刷新勾选状态，与右键菜单保持同步。
+    /// 排序子菜单与视图模式菜单每次展开前刷新勾选状态。
     func menuNeedsUpdate(_ menu: NSMenu) {
+        if menu === viewMenu {
+            for (index, mode) in ViewMode.allCases.enumerated() {
+                menu.item(withTag: 300 + index)?.state = mode == ViewMode.current ? .on : .off
+            }
+            return
+        }
         guard menu === sortMenu else { return }
         let options = MediaSortOptions.current
         for item in menu.items {

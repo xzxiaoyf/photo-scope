@@ -204,11 +204,50 @@ enum SelfTest {
         check(AppDelegate().responds(to: NSSelectorFromString("application:openFile:")),
               "AppDelegate 实现 Launch Services 打开文档回调")
 
+        // 1.10 三种视图模式（网格全览 / 单张 / 并排双图）
+        check(ViewMode.allCases == [.grid, .single, .compare],
+              "视图模式恰好 3 种：网格 / 单张 / 双张")
+        check(ViewMode(rawValue: "grid") == .grid
+              && ViewMode(rawValue: "compare") == .compare
+              && ViewMode(rawValue: "unknown") == nil, "视图模式字符串解析")
+        check(ViewModeControl.segmentCount == 3
+              && ViewModeControl.mode(at: 0) == .grid
+              && ViewModeControl.mode(at: 1) == .single
+              && ViewModeControl.mode(at: 2) == .compare
+              && ViewModeControl.mode(at: 3) == nil,
+              "右上角切换控件三段顺序与越界保护")
+        check(ViewModeControl.icon(for: .compare, highlighted: true).size == NSSize(width: 26, height: 20),
+              "切换控件图标尺寸固定")
+        let pairMid = CompareView.defaultPair(current: 5, count: 10)
+        let pairLast = CompareView.defaultPair(current: 9, count: 10)
+        let pairEmpty = CompareView.defaultPair(current: 0, count: 0)
+        check(pairMid.left == 5 && pairMid.right == 6, "并排默认为相邻两张 A/B")
+        check(pairLast.left == 9 && pairLast.right == 8, "末张时 B 回退到前一张")
+        check(pairEmpty.left == nil && pairEmpty.right == nil, "空目录不产生并排索引")
+        check(CompareSide.allCases.count == 2 && CompareSide.left.other == .right,
+              "并排活动侧可互相切换")
+        check(PhotoGridView.columns(forWidth: 900) >= 4
+              && PhotoGridView.columns(forWidth: 200) == 1, "网格列数随宽度自适应")
+        check(MediaSummaryIndex.formatDate("2024:01:02 03:04:05") == "2024-01-02 03:04",
+              "网格简要信息把 EXIF 日期转为可读格式")
+        let exposure = MediaSummaryIndex.formatExposure(iso: [100], aperture: 6.3,
+                                                        shutter: 1.0 / 60.0, focal: 50)
+        check(exposure?.contains("ISO100") == true && exposure?.contains("F6.3") == true
+              && exposure?.contains("50mm") == true, "网格曝光摘要含 ISO / 光圈 / 焦距")
+        check(MediaSummary(date: "a", model: "b", lens: "c", exposure: "d").lines.count == 4,
+              "网格每格最多 4 行简要 EXIF")
+
         // 2. 目录扫描
         let items = MediaScanner.scan(directory: root)
         check(!items.isEmpty, "扫描到 \(items.count) 个媒体文件")
         let images = items.filter { !$0.isVideo }
         let videos = items.filter { $0.isVideo }
+        if let sample = images.first {
+            let summary = MediaSummaryIndex.shared.summary(for: sample)
+            check(!summary.lines.isEmpty, "网格简要 EXIF 可读（\(sample.name)：\(summary.lines.joined(separator: " / "))）")
+        } else {
+            print("SKIP  目录中没有可用于网格摘要的照片")
+        }
 
         // 2.5 真实目录排序（同步路径，覆盖 EXIF 读取与缓存）
         if items.count > 1 {
