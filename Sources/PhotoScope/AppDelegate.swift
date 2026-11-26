@@ -189,6 +189,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
+        // 轨迹写入 GPS 页面诊断：--show-gps-writer [--gps-track <path>] [--gps-xiaomi]
+        //                       [--gps-scope selected|all] [--gps-dry-run] [--gps-run]
+        if args.contains("--show-gps-writer") || args.contains("--gps-run") {
+            let track = valueAfter("--gps-track", in: args)
+            let scopeRaw = valueAfter("--gps-scope", in: args) ?? "all"
+            let scope = GPSWriteScope(rawValue: scopeRaw) ?? .all
+            let xiaomi = args.contains("--gps-xiaomi")
+            let dryRun = args.contains("--gps-dry-run")
+            let autoRun = args.contains("--gps-run")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak wc] in
+                wc?.debugOpenGPSWriter(track: track, xiaomi: xiaomi, scope: scope,
+                                       dryRun: dryRun, autoRun: autoRun)
+                NSLog("PhotoScope --gps-writer track=%@ xiaomi=%d scope=%@ dryRun=%d autoRun=%d",
+                      track ?? "none", xiaomi, scope.rawValue, dryRun, autoRun)
+            }
+        }
+
         // --screenshot <path> [--delay <sec>] [--quit-after-screenshot]
         // 用于无交互地抓取主窗口渲染结果（不依赖屏幕录制权限）
         if let i = args.firstIndex(of: "--screenshot"), i + 1 < args.count {
@@ -326,6 +343,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         viewItem.submenu = viewMenu
         mainMenu.addItem(viewItem)
 
+        // 工具
+        let toolsItem = NSMenuItem()
+        let toolsMenu = NSMenu(title: "工具")
+        let gpsItem = NSMenuItem(title: "轨迹匹配写入 GPS…",
+                                 action: #selector(MainWindowController.showGPSWriter(_:)),
+                                 keyEquivalent: "g")
+        gpsItem.target = target
+        gpsItem.keyEquivalentModifierMask = [.command, .option]
+        gpsItem.toolTip = "用 GPX / TCX 轨迹按拍摄时间给照片写入 GPS"
+        toolsMenu.addItem(gpsItem)
+        toolsItem.submenu = toolsMenu
+        mainMenu.addItem(toolsItem)
+
         // 窗口
         let windowItem = NSMenuItem()
         let windowMenu = NSMenu(title: "窗口")
@@ -337,6 +367,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.windowsMenu = windowMenu
 
         return mainMenu
+    }
+
+    private func valueAfter(_ flag: String, in args: [String]) -> String? {
+        guard let index = args.firstIndex(of: flag), index + 1 < args.count else { return nil }
+        return args[index + 1]
     }
 
     private func add(_ menu: NSMenu, _ title: String, _ action: Selector, _ key: String, _ target: AnyObject?) {

@@ -1,6 +1,6 @@
 # PhotoScope 操作与功能说明
 
-> 版本 1.4 ｜ macOS 13.0 及以上 ｜ universal（Apple Silicon `arm64` + Intel `x86_64`）
+> 版本 1.6 ｜ macOS 13.0 及以上 ｜ universal（Apple Silicon `arm64` + Intel `x86_64`）
 >
 > PhotoScope 是一款本地运行的 macOS 照片/视频查看器：左侧选目录、右上（单张大图 / 全部照片网格 / 并排双图）、右下缩略图条、顶部工具栏。所有浏览与元数据读取都在本机完成，不上传照片。
 
@@ -14,6 +14,15 @@
 
 
 > 1.4 新增「全部照片列表（网格）」与「双张并排对比」，用标题栏右上角三段图标切换；界面预览见第七、八节。
+> 1.5 新增「轨迹匹配写入 GPS」，1.6 起支持 **FIT 二进制轨迹**：用 GPX / TCX / FIT 按拍摄时间给选中照片或整个目录写入 GPS，支持小米伪 Z 时间修正（仅对文本轨迹生效）、滚动日志与自动 `.log` 落盘；详见第十三节。
+
+轨迹处理页面预览：
+
+![轨迹匹配写入 GPS](Support/Preview-GPS.png)
+
+1.6 起直接选择 FIT 轨迹（示例为 2400 点的大端 FIT，小米修正自动禁用）：
+
+![FIT 轨迹加载预览](Support/Preview-GPS-FIT.png)
 
 ---
 
@@ -21,7 +30,7 @@
 
 ### 从 DMG 安装（推荐）
 
-1. 双击 `PhotoScope-1.4.dmg`，挂载后出现 `PhotoScope.app`、`Applications` 快捷方式、`README.txt`（简版）和 `PhotoScope-操作与功能说明.md`（完整手册）。
+1. 双击 `PhotoScope-1.6.dmg`，挂载后出现 `PhotoScope.app`、`Applications` 快捷方式、`README.txt`（简版）和 `PhotoScope-操作与功能说明.md`（完整手册）。
 2. 把 `PhotoScope.app` 拖到 `Applications`（应用程序）即可。
 3. 双击启动。
 
@@ -44,7 +53,7 @@ xattr -dr com.apple.quarantine /Applications/PhotoScope.app
 cd /Volumes/machack2/download/swift_program/PhotoScope
 ./build.sh                       # release + universal（默认）
 ./build.sh release native run    # 只编译本机架构，构建后直接启动
-./make_dmg.sh                    # 重新生成 PhotoScope-1.4.dmg
+./make_dmg.sh                    # 重新生成 PhotoScope-1.6.dmg
 ```
 
 ---
@@ -58,13 +67,13 @@ cd /Volumes/machack2/download/swift_program/PhotoScope
 | 视图切换 | 标题栏右上角三段图标 | 网格（3×3 方格）｜单张（大方块）｜并排（两竖条）；当前段橙红高亮 |
 | 状态栏 | 主显示区下方 | 文件名、`序号/总数`、文件大小、像素尺寸、视频标记、旋转角度、视图模式、操作提示；右侧显示缩放百分比 |
 | 缩略图条 | 右下，横向滚动 | 当前目录全部媒体的缩略图，始终保留；可左右切换、多选、右键操作 |
-| 工具栏 | 顶部 | 打开文件夹｜上一张/下一张｜缩小/放大/适合窗口/实际大小｜信息/地图位置/另存为 JPG（纯图标 + 中文标签） |
+| 工具栏 | 顶部 | 打开文件夹｜上一张/下一张｜缩小/放大/适合窗口/实际大小｜信息/地图位置/另存为 JPG/轨迹写入 GPS（纯图标 + 中文标签） |
 
 窗口最小尺寸 940×620，标题栏与窗口位置会被系统记忆。
 
 ---
 
-## 三、快速上手（6 步）
+## 三、快速上手（7 步）
 
 1. 点工具栏「**打开文件夹**」，或点左侧底部「添加目录…」，选中一个照片目录。
 2. 目录树中单击某个文件夹，右下列出该目录全部照片与视频，并自动选中第一张。
@@ -72,6 +81,7 @@ cd /Volumes/machack2/download/swift_program/PhotoScope
 4. 点「信息」看 EXIF；有 GPS 时「地图位置」会亮起，可查看拍摄点。
 5. 点「另存为 JPG」，选择质量与保存位置，即可导出并保留原始 EXIF / GPS。
 6. 点标题栏**右上角三段图标**切换「全部照片列表 / 单张 / 双张对比」，详见第六～八节。
+7. 点工具栏「**轨迹写入 GPS**」或「工具 → 轨迹匹配写入 GPS…」，用轨迹文件补写拍摄位置，详见第十三节。
 
 > 也可以不进程序：在访达里右键照片 →「打开方式」→ PhotoScope，程序会自动打开该照片所在目录并定位选中它，详见第四节。
 
@@ -242,7 +252,84 @@ Key 与安全密钥只保存在本机 `UserDefaults`（`PhotoScope.amapKey` / `P
 
 ---
 
-## 十三、视频播放
+## 十三、轨迹匹配写入 GPS（1.5 新增，1.6 支持 FIT）
+
+按照片的**拍摄时间**在轨迹里找最近的一个定位点，把经纬度（有海拔时连海拔一起）**原地写回照片文件**。参考实现是本机 Python 工具 `gps_write_photo_v2.py`，规则保持一致：**没有匹配上就不写入**，宁可留空也不写错位置。
+
+> ⚠ **这是 PhotoScope 唯一会修改原始照片文件的功能**（旋转只是偏好覆盖、导出永远写新文件）。默认开启备份，提交前会二次确认。
+
+### 打开页面
+
+- 工具栏最右侧「**轨迹写入 GPS**」图标；
+- 或「**工具 → 轨迹匹配写入 GPS…**」，快捷键 `⌥⌘G`。
+
+页面是独立窗口，不占用主窗口；打开时会带上当前目录、当前列表和已多选的照片。
+
+### 依赖：exiftool
+
+原地写入 JPG / HEIC / 各家 RAW 的 EXIF GPS 需要外部命令 **exiftool**（https://exiftool.org/）。程序会依次在 `PATH`、常见安装位置（`/usr/local/bin`、`/opt/homebrew/bin` 等）和登录 shell 的 PATH 里查找：
+
+- 找到 → 页面状态栏显示 `exiftool <版本> 已就绪`；
+- 找不到 → 明确提示，**仍可解析轨迹、查看预览、试运行匹配，但提交会被阻止**。
+- exiftool 只是可选运行时工具，**不链接、不打包进 `.app`**，不违反零第三方编译依赖；本机 `/usr/local/bin/exiftool` 已可用。
+
+### 页面五项内容
+
+| 区域 | 操作 |
+| --- | --- |
+| ① 轨迹文件 | 点「选择轨迹文件…」选 GPX / TCX / FIT（格式自动识别，FIT 用文件头 `.FIT` 判定）。选完立即后台解析，路径显示在按钮右侧 |
+| ② 轨迹时间预览 | 显示格式、点数、时间范围（UTC 与北京）、**前 3 条点**的原始时间 / 解释后 UTC / 北京时间 / 坐标海拔（FIT 显示由二进制时间戳还原的 UTC 文本） |
+| ③ 小米修正 | 勾选「小米轨迹时间修正」；切换后预览立即重算，方便判断是否该勾。**选中 FIT 时自动禁用**（二进制时间戳无关伪 Z） |
+| ④ 处理范围 | 单选「仅处理选中的 N 张照片」或「处理当前目录的全部 N 张照片」 |
+| ⑤ 匹配选项 | 容差、照片时区、覆盖已有 GPS、备份、含视频、仅预览匹配；底部「提交处理 / 取消 / 关闭」与滚动日志 |
+
+**「仅处理选中的照片」**：取缩略图条或网格视图里的多选集合（⌘ / Shift 多选）；未多选时退化为当前这一张。**「全部照片」**：当前目录列表里的全部照片（「包含子文件夹」递归开关同样生效），默认不含视频，可勾选「同时处理视频文件」。
+
+### 时间口径（最容易出错的地方）
+
+| 轨迹里的时间文本 | 程序解释 |
+| --- | --- |
+| `2026-09-26T01:34:29Z`（真 UTC） | 直接当 UTC |
+| `2026-09-26T09:34:29+08:00` | 按偏移真换算 → UTC `01:34:29` |
+| `2026-09-26T09:34:29Z`（**小米伪 Z**：其实是北京时间） | 不修正时当 UTC `09:34:29`（会差 8 小时）；**勾选小米修正** → UTC `01:34:29` |
+| 无时区后缀 | 默认当 UTC；小米修正时同样减 8 小时 |
+
+小米修正**只作用于 GPX / TCX 里 `Z` / 无后缀**的时间，带数字偏移的时间不受影响。判断方法：预览区看「北京时间」一行，若照片拍摄时间约为 `09:xx` 而轨迹显示 `17:xx`，就该勾选修正。
+
+**FIT 的时间口径不同**：FIT 里没有时间文本，只有 `uint32` 秒数（起算点 1989-12-31 00:00:00 UTC，按 FIT 规范即 UTC）。程序会把它还原成 UTC 绝对时间，并生成等价的 `2026-10-04T02:15:09Z` 文本用于预览；小米修正对 FIT 一律不生效，也不需要生效。若 FIT 轨迹的北京时间与照片拍摄时间仍差约 8 小时，说明导出该 FIT 的设备时钟本身被设成了本地时间，需先用厂商工具转换或改用已修正的 GPX / TCX。
+
+照片侧：读 `SubSecDateTimeOriginal` → `DateTimeOriginal` → `CreateDate`，按「照片时区 UTC+8」把本地墙钟换算为 UTC；视频用 `-api QuickTimeUTC` 读出的带偏移时间直接换算。
+
+### 匹配与写入规则
+
+1. 在全部轨迹点里找与照片 UTC 时间**绝对差最小**的一个点；
+2. 差值超过「匹配容差」（默认 30 秒）→ 不写入，日志写明相差多少秒；
+3. 照片已有 GPS 且未勾「覆盖已有 GPS」→ 跳过，日志同时列出原 GPS 与匹配点；
+4. 通过检查 → 写入 `GPSLatitude / Longitude`（含 N/S/E/W 参考）、`GPSAltitude`（含 Above/Below Sea Level 参考）；视频写 `Keys:GPSCoordinates`；
+5. 默认在**每个文件所在目录**下建 `exif_backup/` 备份原文件，同名备份自动加序号，绝不覆盖；
+6. 每个文件一行结果（`✓ 已写入` / `✗ 未写入` / `⊘ 跳过` / `✗ 失败`），底部实时滚动；
+7. 结束在**当前照片目录**生成 `GPS写入日志_yyyyMMdd_HHmmss.log`（文件名与日志行时间均为北京时间），内容就是窗口里的完整日志加时间戳。
+
+可先勾「**仅预览匹配结果（不改动任何文件）**」试跑一次，统计显示「可匹配 N / 不匹配 N【仅预览，未写入】」。
+
+### 支持与不支持
+
+- **GPX**：`trkpt` / `rtept` / `wpt`；**TCX**：`Trackpoint`（兼容小米把 `AltitudeMeters` 嵌在 `Position` 内的写法）。
+- **FIT**：Garmin FIT 二进制轨迹，程序内置纯 Swift 最小解码器，**不需要再转 GPX / TCX，也不依赖任何第三方库**。读取 `record` 消息（global #20）的时间戳 / 经纬 / 海拔，支持 12 与 14 字节文件头、大端与小端、压缩时间戳头、开发者字段和无效值；坐标按 semicircles 换算、海拔按 scale/offset 换算。
+- **FIT 范围**：只解析定位点，不解析圈速、心率、功率等其它消息；不校验文件 CRC。部分设备会把时间写成非 UTC 的本地墙钟，此时需先用厂商工具修正（预览区可核对）。
+- **照片**：JPG / JPEG / HEIC / HEIF / TIFF / PNG 及各家 RAW 均可由 exiftool 写入；**视频**：需勾选「同时处理视频文件」。
+- 程序会跳过没有拍摄时间的文件；写入后主窗口自动刷新当前照片的 EXIF，「地图位置」按钮随之可用。
+
+### 建议流程
+
+1. 选轨迹（GPX / TCX / FIT 均可）→ 看预览的前 3 条时间与范围 → GPX / TCX 再决定是否勾「小米轨迹时间修正」；
+2. 勾「仅预览匹配结果」+「全部照片」→ 提交，看能匹配上多少张；
+3. 取消「仅预览」，确认备份已勾 → 提交 → 核对滚动日志与目录下生成的 `.log`；
+4. 若要重跑，勾「覆盖已有 GPS」，或先从 `exif_backup/` 还原。
+
+---
+
+## 十四、视频播放
 
 - 选中视频时右上显示**封面帧 + 高对比「▶ 播放视频」按钮 + 文件名**。
 - 点按钮后交给系统 `AVPlayerView` 播放：内建播放/暂停、进度拖动、音量、全屏切换。
@@ -251,7 +338,7 @@ Key 与安全密钥只保存在本机 `UserDefaults`（`PhotoScope.amapKey` / `P
 
 ---
 
-## 十四、缩略图右键菜单
+## 十五、缩略图右键菜单
 
 在缩略图上右键，菜单如下（带 SF Symbols 图标，当前排序项带勾选）：
 
@@ -297,7 +384,7 @@ Key 与安全密钥只保存在本机 `UserDefaults`（`PhotoScope.amapKey` / `P
 
 ---
 
-## 十五、主菜单与快捷键
+## 十六、主菜单与快捷键
 
 | 菜单 | 项目 | 快捷键 |
 | --- | --- | --- |
@@ -315,12 +402,13 @@ Key 与安全密钥只保存在本机 `UserDefaults`（`PhotoScope.amapKey` / `P
 | 显示 | 照片信息 (EXIF) | `⌘I` |
 | 显示 | 在地图上显示 | `⌘M`（若被系统「最小化」占用，请点工具栏「地图位置」） |
 | 编辑 | 复制 / 全选 | `⌘C` / `⌘A`（信息面板文本框内） |
+| 工具 | 轨迹匹配写入 GPS… | `⌥⌘G` |
 
 右键菜单与主菜单共用同一套处理逻辑，结果完全一致。
 
 ---
 
-## 十六、支持的格式
+## 十七、支持的格式
 
 | 类别 | 扩展名 |
 | --- | --- |
@@ -328,22 +416,24 @@ Key 与安全密钥只保存在本机 `UserDefaults`（`PhotoScope.amapKey` / `P
 | HEIF / AVIF | HEIC、HEIF、HIF、AVIF、AVIFS |
 | 相机 RAW | ARW / SRF / SR2（Sony）、NEF / NRW（Nikon）、CR2 / CR3 / CRW（Canon）、DNG、RAF（Fujifilm）、RW2（Panasonic）、ORF（Olympus）、PEF（Pentax）、3FR / FFF / IIQ（Hasselblad / Phase One）等 40+ 种 |
 | 视频 | MOV、MP4、M4V、MTS / M2TS / TS、AVI、MPG / MPEG、3GP / 3G2、VOB、HEVC、H264、QT |
+| 轨迹（第十三节） | GPX、TCX、FIT（内置解码，无需转换） |
 
 - 判定顺序为「扩展名白名单 → UTType 兜底」，未来系统新增格式也可能被识别；**实际能否解码取决于本机 macOS 的 ImageIO / AVFoundation**（例如个别新机身 RAW 需系统更新后才支持，解码失败会给出明确提示）。
 - 明确排除 `.mkv` / `.webm` / `.flv` / `.wmv` / `.rmvb` 等 macOS 不能稳定解码的封装，以及 `.xmp` / `.aae` / `.dop` / `.gpx` / `.lrv` 等旁路文件。
 
 ---
 
-## 十七、偏好、文件安全与已知限制
+## 十八、偏好、文件安全与已知限制
 
 **本机保存的偏好（UserDefaults）**：上次打开的目录、自定义目录列表、排序字段与方向、**视图模式（网格 / 单张 / 双图）**、JPG 导出质量、每张照片的旋转覆盖、高德 Key 与安全密钥。
 
-**对磁盘的写入只有两类**：
+**对磁盘的写入只有三类**：
 
 1. 「另存为 JPG」写出一个新 `.jpg`（不会覆盖源文件）；
-2. 「移到废纸篓」把文件移入系统废纸篓（可恢复）。
+2. 「移到废纸篓」把文件移入系统废纸篓（可恢复）；
+3. **「轨迹匹配写入 GPS」原地改写所选照片的 EXIF GPS，并在当前目录生成 `.log` 日志**（第十三节）。
 
-浏览、查看 EXIF、看地图、旋转、排序都**不会修改原照片**。
+第 3 项是唯一改动原始照片的功能：提交前二次确认，默认备份到各文件所在目录的 `exif_backup/`，默认跳过已有 GPS，超出容差绝不写入。若关闭备份，写入不可自动回滚，可从备份目录或手动副本恢复。浏览、查看 EXIF、看地图、旋转、排序都**不会修改原照片**。
 
 **已知限制**
 
@@ -353,50 +443,67 @@ Key 与安全密钥只保存在本机 `UserDefaults`（`PhotoScope.amapKey` / `P
 - 少数 EXIF 字段（如部分机型的 `ImageStabilization`、个别 RAW 的 `{Exif}.ColorSpace`）由 ImageIO 的 JPEG 编码器忽略，属于系统行为，不算导出失败。
 - 超大的厂商 MakerNote 会被裁剪以适配 JPEG APP1 段限制。
 - 高德地图需要**你自己申请的有效 Key**，未配置时只显示坐标卡片；真实 Key 下的瓦片加载依赖网络与 Key 的域名白名单设置。
+- 轨迹写入依赖本机 **exiftool**；未安装时只能解析/预览/试运行，不能提交。FIT 由程序内置解码器解析，不依赖 exiftool 或 fitparse，但**写入 GPS 仍需 exiftool**。轨迹与照片时间口径不一致（尤其小米伪 Z）会导致整批不匹配，先用「仅预览匹配结果」核对。
 - 应用为 ad-hoc 签名、未公证，首次打开需按上文处理 Gatekeeper。
 
 ---
 
-## 十八、命令行自检与诊断
+## 十九、命令行自检与诊断
 
 ```bash
-# 不启动 UI，逐项验证格式识别、坐标转换、菜单、旋转、排序、视图模式、EXIF/GPS 保留等
+# 不启动 UI，逐项验证格式识别、坐标转换、菜单、旋转、排序、视图模式、
+# 轨迹解析（GPX / TCX / FIT）/ 小米时间修正 / GPS 写入参数、EXIF/GPS 保留等
 "/Applications/PhotoScope.app/Contents/MacOS/PhotoScope" --selftest --dir /path/to/photos
 
 # 启动时直接打开指定目录，并直接进入网格 / 双图视图（不改动记住的视图偏好）
 "/Applications/PhotoScope.app/Contents/MacOS/PhotoScope" --dir /path/to/photos --view-mode grid
 "/Applications/PhotoScope.app/Contents/MacOS/PhotoScope" --dir /path/to/photos --view-mode compare
+
+# 无交互打开轨迹处理页面：加载轨迹 + 小米修正 + 全部照片 + 仅预览（不写文件）
+# --gps-track 可直接传 .fit；FIT 由内置解码器解析，且会自动忽略 --gps-xiaomi
+"/Applications/PhotoScope.app/Contents/MacOS/PhotoScope" --dir /path/to/photos \
+    --show-gps-writer --gps-track /path/to/track.gpx --gps-xiaomi \
+    --gps-scope all --gps-run --gps-dry-run \
+    --screenshot /tmp/gps.png --delay 10 --quit-after-screenshot
 ```
 
-自检输出逐行 `PASS` / `FAIL`，全部通过时退出码为 `0`，有失败项为 `1`。其余参数主要供开发/自动化验证界面使用：`--dir <目录>`、`--view-mode <grid|single|compare>`、`--dump-view-mode`（打印当前模式、网格列数、A/B 照片）、`--compare-side <left|right>`（模拟点击对比面板）、`--open-file <文件路径>`（模拟访达「打开方式」）、`--select <文件名>`、`--show-info`、`--show-map`、`--map-debug`、`--show-save`、`--dump-quality <png>`、`--show-quality-preview`、`--rotate <n>`、`--sort-by <key>`、`--dump-context-menu`、`--dump-layout`、`--screenshot <png>`（可配 `--delay`、`--quit-after-screenshot`）、`--capture-windows <前缀>`（可配 `--capture-delay`）。
+自检输出逐行 `PASS` / `FAIL`，全部通过时退出码为 `0`，有失败项为 `1`。1.6 基线为 **161 PASS / 0 FAIL**（其中 16 项为 FIT 解码与真实样本回归）。
+
+轨迹相关参数：`--show-gps-writer`（打开页面）、`--gps-track <路径>`（预选轨迹）、`--gps-xiaomi`（勾小米修正）、`--gps-scope <selected|all>`（范围）、`--gps-run`（跳过确认自动提交）、`--gps-dry-run`（只匹配不写入）。
+
+其余参数主要供开发/自动化验证界面使用：`--dir <目录>`、`--view-mode <grid|single|compare>`、`--dump-view-mode`（打印当前模式、网格列数、A/B 照片）、`--compare-side <left|right>`（模拟点击对比面板）、`--open-file <文件路径>`（模拟访达「打开方式」）、`--select <文件名>`、`--show-info`、`--show-map`、`--map-debug`、`--show-save`、`--dump-quality <png>`、`--show-quality-preview`、`--rotate <n>`、`--sort-by <key>`、`--dump-context-menu`、`--dump-layout`、`--screenshot <png>`（可配 `--delay`、`--quit-after-screenshot`）、`--capture-windows <前缀>`（可配 `--capture-delay`）。
 
 ---
 
-## 十九、项目结构
+## 二十、项目结构
 
 ```
 PhotoScope/
 ├── Package.swift                 # SwiftPM，macOS 13+，纯 AppKit，无第三方依赖
 ├── build.sh                      # 编译 + 组装 .app（ad-hoc 签名）
 ├── make_dmg.sh                   # 生成 UDZO 压缩 DMG 并校验挂载
-├── PhotoScope-1.4.dmg            # 分发安装包（推荐）
+├── PhotoScope-1.6.dmg            # 分发安装包（推荐）
 ├── PhotoScope.app                # 可直接运行的应用程序
-├── PhotoScope-操作与功能说明.md  # 本文档
+├── PhotoScope-操作与功能说明.md  # 本文档（用户手册，随 DMG 分发）
+├── PhotoScope-设计文档.md        # 续开发交接文档（不随 DMG 分发）
 ├── Support/
-│   ├── Info.plist                # 版本 1.4、图标、文档类型、权限说明
+│   ├── Info.plist                # 版本 1.6、图标、文档类型、权限说明
 │   ├── AppIcon.icns / .png       # 应用图标
 │   ├── generate_icon.swift       # 图标矢量绘制脚本
 │   ├── Preview.png               # 单张视图预览
 │   ├── Preview-Rotation.png      # 旋转效果预览
 │   ├── Preview-Grid.png          # 全部照片列表（网格）预览
-│   └── Preview-Compare.png       # 双张并排对比预览
+│   ├── Preview-Compare.png       # 双张并排对比预览
+│   ├── Preview-GPS.png           # 轨迹匹配写入 GPS 页面预览
+│   └── Preview-GPS-FIT.png       # 1.6 FIT 轨迹加载预览
 └── Sources/PhotoScope/
     ├── AppDelegate.swift / main.swift / MainWindowController.swift
     ├── Models/        # MediaItem、DirectoryNode、MediaSortOptions、ViewMode
     ├── Services/      # 扫描、解码、缩略图缓存、元数据、EXIF 保留、坐标转换、
     │                  # 高德页面、JPG 导出、旋转存储、排序索引、网格简要 EXIF、
-    │                  # 访达打开路由
+    │                  # 访达打开路由、轨迹解析、exiftool 调用、GPS 批量写入
     ├── Views/         # 目录树、大图、缩略图条、右键菜单、信息面板、地图窗口、
-    │                  # 视频播放、质量控件、视图切换控件、网格视图、并排对比视图
+    │                  # 视频播放、质量控件、视图切换控件、网格视图、并排对比视图、
+    │                  # 轨迹处理页面
     └── SelfTest.swift # 命令行自检
 ```

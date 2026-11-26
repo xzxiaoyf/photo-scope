@@ -13,6 +13,7 @@ private enum ToolbarID {
     static let info = "ps.info"
     static let map = "ps.map"
     static let save = "ps.save"
+    static let gpsWriter = "ps.gpsWriter"
 }
 
 /// 主窗口：左侧目录树 / 右上（单张大图、全部照片网格、并排双图）/ 右下缩略图条 / 顶部工具栏。
@@ -41,6 +42,7 @@ final class MainWindowController: NSWindowController,
     private var viewModeControl: ViewModeControl?
     private var infoController: MetadataWindowController?
     private var mapController: MapWindowController?
+    private var gpsWriterController: GPSWriterWindowController?
     private var keyMonitor: Any?
     /// 自动化诊断：把保存面板中的质量控件渲染到指定 PNG 路径
     var qualityDumpPath: String?
@@ -252,7 +254,8 @@ final class MainWindowController: NSWindowController,
             NSToolbarItem.Identifier(ToolbarID.actual),
             NSToolbarItem.Identifier(ToolbarID.info),
             NSToolbarItem.Identifier(ToolbarID.map),
-            NSToolbarItem.Identifier(ToolbarID.save)
+            NSToolbarItem.Identifier(ToolbarID.save),
+            NSToolbarItem.Identifier(ToolbarID.gpsWriter)
         ]
     }
 
@@ -274,7 +277,8 @@ final class MainWindowController: NSWindowController,
             ToolbarID.actual: ("实际大小", "1.circle", #selector(actualSize(_:))),
             ToolbarID.info: ("信息", "info.circle", #selector(toggleInfo(_:))),
             ToolbarID.map: ("地图位置", "mappin.circle", #selector(showMap(_:))),
-            ToolbarID.save: ("另存为 JPG", "square.and.arrow.down", #selector(saveAsJPEG(_:)))
+            ToolbarID.save: ("另存为 JPG", "square.and.arrow.down", #selector(saveAsJPEG(_:))),
+            ToolbarID.gpsWriter: ("轨迹写入 GPS", "location.circle", #selector(showGPSWriter(_:)))
         ]
         guard let spec = specs[id] else { return nil }
 
@@ -922,6 +926,47 @@ final class MainWindowController: NSWindowController,
         guard let gps = currentMetadata?.gps, let name = currentItem?.name else { return }
         if mapController == nil { mapController = MapWindowController() }
         mapController?.show(location: gps, fileName: name)
+    }
+
+    // MARK: - 轨迹匹配写入 GPS
+
+    /// 工具栏 / 「工具」菜单入口：打开独立处理页面，并同步当前目录、列表与多选集合。
+    @objc func showGPSWriter(_ sender: Any?) {
+        openGPSWriter(diagnostic: nil)
+    }
+
+    private typealias GPSDiagnostic = (track: String?, xiaomi: Bool, scope: GPSWriteScope,
+                                       dryRun: Bool, autoRun: Bool)
+
+    private func openGPSWriter(diagnostic: GPSDiagnostic?) {
+        if gpsWriterController == nil { gpsWriterController = GPSWriterWindowController() }
+        guard let controller = gpsWriterController else { return }
+
+        let indexes: [Int] = viewMode == .grid
+            ? gridView.selectedIndexes
+            : stripView.selectedIndexes
+        let effective = indexes.isEmpty ? [currentIndex].filter { $0 >= 0 } : indexes
+        controller.updateContext(directory: currentDirectory, items: items,
+                                 selectedIndexes: effective)
+        controller.onDidFinish = { [weak self] in
+            guard let item = self?.currentItem else { return }
+            self?.loadMetadata(for: item)
+        }
+
+        if let diagnostic {
+            controller.diagnosticTrackPath = diagnostic.track
+            controller.diagnosticXiaomi = diagnostic.xiaomi
+            controller.diagnosticScope = diagnostic.scope
+            controller.diagnosticDryRun = diagnostic.dryRun
+            controller.autoRun = diagnostic.autoRun
+        }
+        controller.toggle()
+    }
+
+    /// 自动化诊断：--show-gps-writer / --gps-run，无交互地打开并（可选）自动提交。
+    func debugOpenGPSWriter(track: String?, xiaomi: Bool, scope: GPSWriteScope,
+                            dryRun: Bool, autoRun: Bool) {
+        openGPSWriter(diagnostic: (track, xiaomi, scope, dryRun, autoRun))
     }
 
     @objc func saveAsJPEG(_ sender: Any?) {

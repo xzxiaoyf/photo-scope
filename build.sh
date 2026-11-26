@@ -62,6 +62,7 @@ echo "    打包: ./make_dmg.sh 生成可分发的 DMG 安装包"
 echo "    列表: 在缩略图上右键可旋转 / 移到废纸篓 / 按文件名·拍摄时间·型号·镜头排序"
 echo "    视图: 标题栏右上角三段图标 = 全部照片列表 / 单张 / 双张对比（⌥⌘1/2/3）"
 echo "    访达: 右键照片 →「打开方式」→ PhotoScope 会自动打开所在目录并定位该文件"
+echo "    轨迹: 工具栏 /⌥⌘G 用 GPX·TCX·FIT 轨迹按拍摄时间写入 GPS；FIT 内置解码，支持小米时间修正、备份、日志与 .log（需 exiftool）"
 echo "    图标: swift Support/generate_icon.swift Support/AppIcon.png 可重新生成"
 
 if [ "$ACTION" = "run" ]; then

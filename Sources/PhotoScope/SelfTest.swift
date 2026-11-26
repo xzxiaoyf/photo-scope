@@ -237,6 +237,214 @@ enum SelfTest {
         check(MediaSummary(date: "a", model: "b", lens: "c", exposure: "d").lines.count == 4,
               "网格每格最多 4 行简要 EXIF")
 
+        // 1.11 轨迹解析与 GPS 写入（GPX / TCX、小米伪 Z 修正、匹配、写入参数）
+        let zulu = GPSTrack.parseTime("2026-09-26T09:34:29.000Z")
+        check(zulu.map { GPSTrack.utcString($0) } == "2026-09-26 09:34:29",
+              "轨迹 Z 时间默认按真 UTC 墙钟解释")
+        check(GPSTrack.parseTime("2026-09-26T09:34:29.000Z", xiaomiCorrection: true)
+                .map { GPSTrack.utcString($0) } == "2026-09-26 01:34:29",
+              "小米修正把伪 Z 的北京时间减 8 小时")
+        check(GPSTrack.parseTime("2026-09-26T09:34:29.000z") == zulu,
+              "小写 z / 小数秒时间解析与大写 Z 一致")
+        let offsetTime = GPSTrack.parseTime("2026-09-26T09:34:29+08:00")
+        check(offsetTime.map { GPSTrack.utcString($0) } == "2026-09-26 01:34:29",
+              "带数字偏移的时间按偏移真换算成 UTC")
+        check(GPSTrack.parseTime("2026-09-26T09:34:29+08:00", xiaomiCorrection: true) == offsetTime,
+              "小米修正不影响带数字偏移的时间")
+        check(GPSTrack.parseTime("2026-09-26 09:34:29").map { GPSTrack.utcString($0) }
+              == "2026-09-26 09:34:29", "空格分隔 / 缺时区后缀的时间可解析")
+        check(GPSTrack.parseTime("not-a-time") == nil, "非法轨迹时间返回 nil")
+        check(GPSTrack.beijingString(zulu!) == "2026-09-26 17:34:29",
+              "轨迹时间可按 +8 显示北京时间供人工核对")
+
+        let gpx = """
+        <?xml version="1.0"?><gpx version="1.1" creator="test">
+          <trk><trkseg>
+            <trkpt lat="34.223122" lon="117.185898"><ele>123.4</ele><time>2026-09-26T09:34:29Z</time></trkpt>
+            <trkpt lat="34.223123" lon="117.185899"><ele>124.0</ele><time>2026-09-26T09:34:31Z</time></trkpt>
+            <trkpt lat="34.223124" lon="117.185900"><time>2026-09-26T09:34:33Z</time></trkpt>
+          </trkseg></trk>
+        </gpx>
+        """
+        let gpxPoints = GPSTrack.parse(data: Data(gpx.utf8), format: .gpx, xiaomiCorrection: false)
+        check(gpxPoints.count == 3, "GPX 解析出 3 个 trkpt")
+        check(gpxPoints.first?.altitude == 123.4 && gpxPoints.last?.altitude == nil,
+              "GPX 海拔可选读取")
+        let gpxInfo = GPSTrack.info(for: gpxPoints, url: URL(fileURLWithPath: "/tmp/a.gpx"), format: .gpx)
+        check(gpxInfo.withTime == 3 && gpxInfo.withAltitude == 2
+              && gpxInfo.samples.count == GPSTrack.previewSampleCount,
+              "轨迹统计含时间点数 / 海拔点数 / 前 3 条预览")
+        let correctedGPX = GPSTrack.parse(data: Data(gpx.utf8), format: .gpx, xiaomiCorrection: true)
+        check(correctedGPX.first?.time.map { GPSTrack.utcString($0) } == "2026-09-26 01:34:29",
+              "小米修正同时作用于 GPX 全部 Z 时间点")
+
+        let tcx = """
+        <TrainingCenterDatabase><Activities><Activity><Lap><Track>
+          <Trackpoint><Time>2026-09-26T09:34:29Z</Time><Position>
+            <LatitudeDegrees>34.223122</LatitudeDegrees>
+            <LongitudeDegrees>117.185898</LongitudeDegrees>
+            <AltitudeMeters>2478.5</AltitudeMeters>
+          </Position></Trackpoint>
+          <Trackpoint><Time>2026-09-26T09:34:31Z</Time>
+            <LatitudeDegrees>34.223123</LatitudeDegrees>
+            <LongitudeDegrees>117.185899</LongitudeDegrees>
+            <AltitudeMeters>2479.0</AltitudeMeters>
+          </Trackpoint>
+        </Track></Lap></Activity></Activities></TrainingCenterDatabase>
+        """
+        let tcxPoints = GPSTrack.parse(data: Data(tcx.utf8), format: .tcx, xiaomiCorrection: false)
+        check(tcxPoints.count == 2, "TCX 解析出 2 个 Trackpoint")
+        check(tcxPoints[0].altitude == 2478.5 && tcxPoints[1].altitude == 2479.0,
+              "TCX 两种海拔布局（Position 内 / 直接子元素）都能读")
+        check(tcxPoints[0].rawTime == "2026-09-26T09:34:29Z", "TCX 原始时间文本保留供预览")
+        check(GPSTrack.parse(data: Data(tcx.utf8), format: .tcx, xiaomiCorrection: true)
+                .first?.time.map { GPSTrack.utcString($0) } == "2026-09-26 01:34:29",
+              "TCX 小米时间修正生效")
+
+        // 1.6 FIT 二进制轨迹（合成样本：大小端 / 压缩时间戳 / 无效值 / 小米修正隔离）
+        let fitLE = syntheticFIT(bigEndian: false, compressedSecond: false)
+        let fitBE = syntheticFIT(bigEndian: true, compressedSecond: false)
+        let fitCompressed = syntheticFIT(bigEndian: false, compressedSecond: true)
+        check(FITTrackParser.hasValidHeader(fitLE)
+              && !FITTrackParser.hasValidHeader(Data(fitLE.dropFirst(3))),
+              "FIT 文件头魔数与数据长度校验")
+        let lePoints = GPSTrack.parse(data: fitLE, format: .fit, xiaomiCorrection: false)
+        let bePoints = GPSTrack.parse(data: fitBE, format: .fit, xiaomiCorrection: false)
+        check(lePoints.count == 2 && bePoints.count == 2,
+              "FIT 大端 / 小端样本各解析出 2 个 record 点")
+        check(lePoints.first?.time.map { GPSTrack.utcString($0) } == "2026-10-04 02:15:09"
+              && bePoints.first?.time.map { GPSTrack.utcString($0) } == "2026-10-04 02:15:09",
+              "FIT 时间戳按 FIT epoch(1989-12-31) 还原为 UTC")
+        check(abs((lePoints.first?.latitude ?? 0) - 34.227386) < 1e-6
+              && abs((lePoints.first?.longitude ?? 0) - 117.161217) < 1e-6
+              && abs((bePoints.first?.latitude ?? 0) - 34.227386) < 1e-6,
+              "FIT semicircles 坐标换算成度（大小端结果一致）")
+        check(lePoints.first?.altitude == 34.0 && lePoints.last?.altitude == nil,
+              "FIT 海拔 scale/offset 换算，0xFFFF 无效值不写入")
+        check(lePoints.first?.rawTime == "2026-10-04T02:15:09Z"
+              && lePoints.first?.timeIsBinary == true,
+              "FIT 生成等价 rawTime 文本并标记二进制时间")
+        let correctedFIT = GPSTrack.parse(data: fitLE, format: .fit, xiaomiCorrection: true)
+        check(correctedFIT.first?.time.map { GPSTrack.utcString($0) } == "2026-10-04 02:15:09",
+              "小米伪 Z 修正不影响 FIT 二进制 UTC 时间")
+        let compressedResult = FITTrackParser.parseDetailed(fitCompressed)
+        check(compressedResult.compressedTimestampHeaders == 1
+              && compressedResult.points.count == 2
+              && compressedResult.points.last?.time.map { GPSTrack.utcString($0) } == "2026-10-04 02:15:10",
+              "FIT 压缩时间戳头还原出第二点时间")
+        let fitProbe = GPSTrack.parseTime("2026-10-04T02:15:09Z")!
+        check(GPSTrack.nearest(to: fitProbe, in: lePoints)?.difference == 0,
+              "FIT 点可直接参与最近时间匹配")
+        let fitTemp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PhotoScope-FIT-\(UUID().uuidString).bin")
+        try? fitLE.write(to: fitTemp)
+        check(GPSTrack.detectFormat(fitTemp) == .fit, "无扩展名文件按 .FIT 魔数识别")
+        if let loaded = try? GPSTrack.load(url: fitTemp, xiaomiCorrection: false) {
+            check(loaded.info.format == .fit && loaded.info.total == 2 && loaded.info.withTime == 2,
+                  "GPSTrack.load 接受 FIT 并产出标准 TrackInfo")
+        } else {
+            check(false, "GPSTrack.load 接受 FIT 并产出标准 TrackInfo")
+        }
+        try? FileManager.default.removeItem(at: fitTemp)
+
+        // 1.7 本机真实 FIT 回归（样本不存在时跳过，保证其它机器上自检也能跑）
+        let realFIT = URL(fileURLWithPath: "/Volumes/machack2/download/20261004/20261004健走_Z.fit")
+        let realGPX = URL(fileURLWithPath: "/Volumes/machack2/download/20261004/20261004健走_Z.gpx")
+        if FileManager.default.fileExists(atPath: realFIT.path) {
+            do {
+                let fit = try GPSTrack.load(url: realFIT, xiaomiCorrection: false)
+                check(fit.info.total == 2400 && fit.info.withTime == 2400,
+                      "真实 FIT（20261004 健走）解析出 2400 个带时间戳的点")
+                let first = GPSTrack.sortedByTime(fit.points).first
+                check(first?.time.map { GPSTrack.utcString($0) } == "2026-10-04 02:15:09"
+                      && abs((first?.latitude ?? 0) - 34.227386) < 1e-5
+                      && abs((first?.longitude ?? 0) - 117.161217) < 1e-5,
+                      "真实 FIT 首点时间 / 坐标与独立解码结果一致")
+                if FileManager.default.fileExists(atPath: realGPX.path) {
+                    let gpx = try GPSTrack.load(url: realGPX, xiaomiCorrection: false)
+                    let gpxFirst = GPSTrack.sortedByTime(gpx.points).first
+                    check(gpx.info.total == fit.info.total
+                          && gpxFirst?.time == first?.time
+                          && abs((gpxFirst?.latitude ?? 0) - (first?.latitude ?? 0)) < 1e-5
+                          && abs((gpxFirst?.longitude ?? 0) - (first?.longitude ?? 0)) < 1e-5,
+                          "FIT 与同名 GPX 是同一条轨迹（点数 / 首点时间和坐标一致）")
+                } else {
+                    print("SKIP  同名 GPX 不存在，跳过 FIT/GPX 对照")
+                }
+            } catch {
+                check(false, "真实 FIT 加载失败：\(error.localizedDescription)")
+            }
+        } else {
+            print("SKIP  本机无真实 FIT 样本，跳过端到端对照")
+        }
+        let hikingFIT = URL(fileURLWithPath: "/Volumes/machack2/download/20260728/Hiking_20260728_090715.fit")
+        if FileManager.default.fileExists(atPath: hikingFIT.path) {
+            if let loaded = try? GPSTrack.load(url: hikingFIT, xiaomiCorrection: false) {
+                check(loaded.info.total == 4041 && loaded.info.withTime == 4041,
+                      "第二个真实 FIT（20260728 徒步）解析出 4041 个有效点")
+                check(GPSTrack.sortedByTime(loaded.points).first?.time
+                        .map { GPSTrack.utcString($0) } == "2026-07-28 01:07:19",
+                      "第二个真实 FIT 首点时间正确")
+            } else {
+                check(false, "第二个真实 FIT 加载失败")
+            }
+        } else {
+            print("SKIP  本机无第二个真实 FIT 样本")
+        }
+
+        let probeTime = GPSTrack.parseTime("2026-09-26T09:34:32Z")!
+        let match = GPSTrack.nearest(to: probeTime, in: gpxPoints)
+        check(match?.difference == 1 && match?.point.rawTime == "2026-09-26T09:34:31Z",
+              "最近轨迹点按绝对时间差匹配（并列取先出现者）")
+        check(GPSTrack.nearest(to: probeTime, in: [TrackPoint(latitude: 1, longitude: 1,
+                                                             altitude: nil, time: nil,
+                                                             rawTime: nil)]) == nil,
+              "全部无时间戳时匹配返回 nil")
+        let unsorted = Array(gpxPoints.reversed())
+        check(GPSTrack.sortedByTime(unsorted).first?.rawTime == "2026-09-26T09:34:29Z",
+              "轨迹点按时间升序排列")
+
+        let photoTime = ExifTool.parseMediaTime("2026:07:28 09:12:45")
+        check(photoTime?.utc == nil
+              && photoTime.map { GPSTrack.utcString($0.wall) } == "2026-07-28 09:12:45",
+              "照片 EXIF 时间按本地墙钟解析（不带偏移）")
+        let videoTime = ExifTool.parseMediaTime("2026:09:26 09:36:02+08:00")
+        check(videoTime?.utc.map { GPSTrack.utcString($0) } == "2026-09-26 01:36:02",
+              "视频 QuickTimeUTC 带偏移时间真换算成 UTC")
+
+        let positive = TrackPoint(latitude: 34.2, longitude: 117.1, altitude: 25.2,
+                                  time: nil, rawTime: nil)
+        let positiveArgs = ExifTool.gpsWriteArguments(point: positive, isVideo: false)
+        check(positiveArgs.contains("-GPSLatitudeRef=N") && positiveArgs.contains("-GPSLongitudeRef=E")
+              && positiveArgs.contains("-GPSAltitudeRef=Above Sea Level"),
+              "GPS 写入参数含 N/E 与字符串海拔参考")
+        let negative = TrackPoint(latitude: -34.2, longitude: -117.1, altitude: -12.5,
+                                  time: nil, rawTime: nil)
+        let negativeArgs = ExifTool.gpsWriteArguments(point: negative, isVideo: false)
+        check(negativeArgs.contains("-GPSLatitudeRef=S") && negativeArgs.contains("-GPSLongitudeRef=W")
+              && negativeArgs.contains("-GPSAltitudeRef=Below Sea Level")
+              && negativeArgs.contains("-GPSAltitude=12.5"),
+              "负坐标 / 负海拔写入 S/W 与 Below Sea Level")
+        let videoArgs = ExifTool.gpsWriteArguments(point: positive, isVideo: true)
+        check(videoArgs.contains("-Keys:GPSCoordinates=34.200000 117.100000")
+              && !videoArgs.contains(where: { $0.contains("GPSAltitude") }),
+              "视频写入只用两段 Keys:GPSCoordinates，不带海拔")
+        let logName = GPSWriter.logFileName(date: GPSTrack.parseTime("2026-11-26T04:05:06Z")!)
+        check(logName == "GPS写入日志_20261126_120506.log",
+              "日志文件名为带时间戳的 .log（北京时间口径）")
+        check(GPSTrack.detectFormat(URL(fileURLWithPath: "/tmp/t.GPX")) == .gpx
+              && GPSTrack.detectFormat(URL(fileURLWithPath: "/tmp/t.tcx")) == .tcx
+              && GPSTrack.detectFormat(URL(fileURLWithPath: "/tmp/t.fit")) == .fit,
+              "轨迹格式按扩展名识别")
+        check(GPSWriteOptions().tolerance == 30 && GPSWriteOptions().photoTimezoneHours == 8
+              && GPSWriteOptions().backupBeforeWrite,
+              "写入默认：容差 30s / UTC+8 / 默认开启备份")
+        if ExifTool.isAvailable() {
+            check(ExifTool.version()?.isEmpty == false, "exiftool 可用且能读取版本")
+        } else {
+            print("INFO  本机未安装 exiftool，跳过版本断言（GUI 会提示优雅降级）")
+        }
+
         // 2. 目录扫描
         let items = MediaScanner.scan(directory: root)
         check(!items.isEmpty, "扫描到 \(items.count) 个媒体文件")
@@ -633,4 +841,53 @@ private func compareEXIF(source: URL, output: URL, name: String,
             check(false, "GPS 坐标保留（\(name)）")
         }
     }
+}
+
+// MARK: - FIT 自检样本构造
+
+/// 构造最小但合法的 FIT 文件：14 字节头 + definition(msg 20) + 2 个 data message + CRC。
+/// `compressedSecond = true` 时第二个点用「压缩时间戳头」并省略 definition 里的 253 字段。
+private func syntheticFIT(bigEndian: Bool, compressedSecond: Bool) -> Data {
+    let t0: UInt32 = 1_160_014_509          // 2026-10-04 02:15:09 UTC，FIT epoch 起算
+    let lat0: Int32 = 408_348_621           // 34.227386°
+    let lon0: Int32 = 1_397_787_765         // 117.161217°
+    let lat1: Int32 = 408_348_669
+    let lon1: Int32 = 1_397_787_848
+
+    func u16(_ value: UInt16) -> [UInt8] {
+        let low = UInt8(value & 0xFF), high = UInt8(value >> 8)
+        return bigEndian ? [high, low] : [low, high]
+    }
+    func u32(_ value: UInt32) -> [UInt8] {
+        let bytes = [UInt8(value & 0xFF), UInt8((value >> 8) & 0xFF),
+                     UInt8((value >> 16) & 0xFF), UInt8((value >> 24) & 0xFF)]
+        return bigEndian ? Array(bytes.reversed()) : bytes
+    }
+    func s32(_ value: Int32) -> [UInt8] { u32(UInt32(bitPattern: value)) }
+    let arch: UInt8 = bigEndian ? 1 : 0
+
+    var body: [UInt8] = []
+    // definition 0：record(global #20)，字段 253 timestamp / 0 lat / 1 lon / 2 altitude
+    body += [0x40, 0x00, arch] + u16(20)
+        + [4, 253, 4, 0x86, 0, 4, 0x85, 1, 4, 0x85, 2, 2, 0x84]
+    // data 0：正常头，海拔 raw 2670 → (2670/5)-500 = 34.0 m
+    body += [0x00] + u32(t0) + s32(lat0) + s32(lon0) + u16(2670)
+
+    if compressedSecond {
+        // definition 1：同一个 record，去掉 timestamp 字段，由压缩头提供时间
+        body += [0x41, 0x00, arch] + u16(20)
+            + [3, 0, 4, 0x85, 1, 4, 0x85, 2, 2, 0x84]
+        let offset = UInt8((t0 + 1) & 0x1F)
+        body += [0x80 | (1 << 5) | offset] + s32(lat1) + s32(lon1) + u16(2675)
+    } else {
+        // data 1：正常头，海拔 0xFFFF 是 FIT 的无效值
+        body += [0x00] + u32(t0 + 1) + s32(lat1) + s32(lon1) + u16(0xFFFF)
+    }
+
+    var header: [UInt8] = [14, 0x20, 0x00, 0x00]   // header size / protocol 2.0 / profile
+    let size = UInt32(body.count)
+    header += [UInt8(size & 0xFF), UInt8((size >> 8) & 0xFF),
+               UInt8((size >> 16) & 0xFF), UInt8((size >> 24) & 0xFF)]
+    header += [0x2E, 0x46, 0x49, 0x54, 0x00, 0x00] // ".FIT" + header CRC（本解析器不校验 CRC）
+    return Data(header + body + [0x00, 0x00])        // file CRC
 }

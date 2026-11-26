@@ -91,6 +91,11 @@ final class ThumbnailStrip: NSView, NSCollectionViewDataSource, NSCollectionView
         syncDocumentSize()
     }
 
+    /// 当前多选集合（供「仅处理选中的照片」等批量功能读取）。
+    var selectedIndexes: [Int] {
+        collectionView.selectionIndexPaths.map(\.item).filter { items.indices.contains($0) }.sorted()
+    }
+
     func select(index: Int) {
         isProgrammaticSelection = true
         if index < 0 || index >= items.count {
